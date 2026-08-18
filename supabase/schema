@@ -1,0 +1,97 @@
+-- ============================================================
+-- Suivi Budget — schéma Supabase
+-- À exécuter dans Supabase > SQL Editor (nouveau projet dédié)
+-- ============================================================
+
+-- Versements sur les plateformes (Trade Republic / Binance)
+create table if not exists deposits (
+  id text primary key,
+  platform text not null,
+  amount numeric not null,
+  date date not null,
+  recurring_id text,
+  created_at timestamptz default now()
+);
+
+-- Achats ETF / Actions / Crypto
+create table if not exists transactions (
+  id text primary key,
+  platform text not null,
+  category text not null,
+  name text not null,
+  quantity numeric not null,
+  price numeric not null,
+  date date not null,
+  recurring_id text,
+  created_at timestamptz default now()
+);
+
+-- Prix de simulation ("case test") par position — une ligne par position
+create table if not exists test_prices (
+  position_key text primary key,
+  price numeric
+);
+
+-- Versements assurance vie
+create table if not exists av_deposits (
+  id text primary key,
+  amount numeric not null,
+  date date not null,
+  note text,
+  recurring_id text,
+  created_at timestamptz default now()
+);
+
+-- Dépenses (fixe / variable)
+create table if not exists expenses (
+  id text primary key,
+  type text not null,
+  category text not null,
+  amount numeric not null,
+  date date not null,
+  recurring_id text,
+  created_at timestamptz default now()
+);
+
+-- Paramètres généraux (une seule ligne, id fixe = 1)
+create table if not exists settings (
+  id int primary key default 1,
+  monthly_income numeric not null default 0
+);
+insert into settings (id, monthly_income) values (1, 0) on conflict (id) do nothing;
+
+-- Règles de versements/achats/dépenses périodiques
+create table if not exists recurring_rules (
+  id text primary key,
+  kind text not null,               -- 'deposit' | 'av' | 'transaction' | 'expense'
+  active boolean not null default true,
+  platform text,
+  category text,
+  name text,
+  quantity numeric,
+  price numeric,
+  amount numeric,
+  note text,
+  start_date date not null,
+  frequency_value int not null,
+  frequency_unit text not null,     -- 'jour' | 'semaine' | 'mois'
+  end_date date,
+  last_generated_date date,
+  created_at timestamptz default now()
+);
+
+-- ============================================================
+-- Sécurité : pas d'authentification (choix assumé, cf. conversation).
+-- RLS désactivé pour que la clé publique (anon) puisse lire/écrire.
+-- ⚠️ Quiconque a la clé anon + l'URL Supabase peut interroger ces
+-- tables directement, indépendamment de l'URL "secrète" du site.
+-- Si tu changes d'avis plus tard, active RLS + une vraie policy
+-- d'authentification sur chaque table.
+-- ============================================================
+alter table deposits disable row level security;
+alter table transactions disable row level security;
+alter table test_prices disable row level security;
+alter table av_deposits disable row level security;
+alter table expenses disable row level security;
+alter table settings disable row level security;
+alter table recurring_rules disable row level security;
