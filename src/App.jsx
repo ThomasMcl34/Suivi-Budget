@@ -53,29 +53,35 @@ const eur = (n) =>
 const signedEur = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${eur(Math.abs(n || 0))}`;
 const signedPct = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n || 0).toFixed(1)}%`;
 
-function periodStart(period) {
-  const d = new Date();
-  switch (period) {
-    case "1j": d.setDate(d.getDate() - 1); return d;
-    case "7j": d.setDate(d.getDate() - 7); return d;
-    case "1m": d.setMonth(d.getMonth() - 1); return d;
-    case "1a": d.setFullYear(d.getFullYear() - 1); return d;
-    default: return new Date(2000, 0, 1);
-  }
+function periodRange(period, offset = 0) {
+  const end = new Date(); end.setHours(23, 59, 59, 999);
+  if (period === "1j") end.setDate(end.getDate() - offset);
+  else if (period === "7j") end.setDate(end.getDate() - offset * 7);
+  else if (period === "1m") end.setMonth(end.getMonth() - offset);
+  else if (period === "1a") end.setFullYear(end.getFullYear() - offset);
+  const start = new Date(end);
+  if (period === "1j") start.setDate(start.getDate() - 1);
+  else if (period === "7j") start.setDate(start.getDate() - 7);
+  else if (period === "1m") start.setMonth(start.getMonth() - 1);
+  else if (period === "1a") start.setFullYear(start.getFullYear() - 1);
+  else { start.setFullYear(2000, 0, 1); start.setHours(0, 0, 0, 0); }
+  return { start, end };
 }
 
-function inPeriod(dateStr, period) {
-  return new Date(dateStr) >= periodStart(period);
+function inPeriodRange(dateStr, period, offset = 0) {
+  if (period === "tout") return true;
+  const { start, end } = periodRange(period, offset);
+  const d = new Date(dateStr);
+  return d >= start && d <= end;
 }
 
-function bucketsForPeriod(period) {
-  const now = new Date(); now.setHours(23, 59, 59, 999);
-  const start = periodStart(period);
+function bucketsForPeriod(period, offset = 0) {
+  const { start, end } = periodRange(period, offset);
   const useMonth = period === "1a" || period === "tout";
   const buckets = [];
   if (!useMonth) {
     const cursor = new Date(start); cursor.setHours(0, 0, 0, 0);
-    while (cursor <= now) {
+    while (cursor <= end) {
       const bStart = new Date(cursor);
       const bEnd = new Date(cursor); bEnd.setHours(23, 59, 59, 999);
       buckets.push({ label: bStart.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }), start: bStart, end: bEnd });
@@ -83,14 +89,14 @@ function bucketsForPeriod(period) {
     }
   } else {
     const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-    while (cursor <= now) {
+    while (cursor <= end) {
       const bStart = new Date(cursor);
       const bEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59, 999);
       buckets.push({ label: bStart.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }), start: bStart, end: bEnd });
       cursor.setMonth(cursor.getMonth() + 1);
     }
   }
-  return buckets.length ? buckets : [{ label: "—", start, end: now }];
+  return buckets.length ? buckets : [{ label: "—", start, end }];
 }
 
 function formatAxisEur(v) {
@@ -267,6 +273,23 @@ function PeriodBar({ value, onChange }) {
   );
 }
 
+function PeriodNav({ period, onPeriodChange, offset, onOffsetChange }) {
+  const { start, end } = periodRange(period, offset);
+  const fmt = (d) => d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return (
+    <div className="bt-period-nav">
+      <PeriodBar value={period} onChange={(p) => { onPeriodChange(p); onOffsetChange(0); }} />
+      {period !== "tout" && (
+        <div className="bt-period-window">
+          <button className="bt-icon-btn" onClick={() => onOffsetChange(offset + 1)} aria-label="Période précédente"><ChevronLeft size={16} /></button>
+          <span>{fmt(start)} → {fmt(end)}</span>
+          <button className="bt-icon-btn" onClick={() => onOffsetChange(Math.max(0, offset - 1))} disabled={offset === 0} aria-label="Période suivante"><ChevronRight size={16} /></button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModeToggle({ value, onChange }) {
   return (
     <div className="bt-toggle2">
@@ -301,8 +324,8 @@ function FieldRow({ label, children }) {
 
 /* ============================== ACCUEIL ============================== */
 
-function buildOverviewData(period, { transactions, avDeposits, expenses }, mode) {
-  const buckets = bucketsForPeriod(period);
+function buildOverviewData(period, offset, { transactions, avDeposits, expenses }, mode) {
+  const buckets = bucketsForPeriod(period, offset);
   const investEvents = [
     ...transactions.map((t) => ({ date: t.date, amount: Number(t.quantity) * Number(t.price) })),
     ...avDeposits.map((d) => ({ date: d.date, amount: Number(d.amount) })),
@@ -328,6 +351,7 @@ function buildOverviewData(period, { transactions, avDeposits, expenses }, mode)
 function AccueilTab({ data }) {
   const { deposits, transactions, testPrices, avDeposits, expenses, settings } = data;
   const [period, setPeriod] = useState("1m");
+  const [offset, setOffset] = useState(0);
   const [mode, setMode] = useState("eur");
   const [filter, setFilter] = useState("tout");
 
@@ -348,7 +372,7 @@ function AccueilTab({ data }) {
   const depensesMois = expenses.filter((e) => { const d = new Date(e.date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((s, e) => s + Number(e.amount), 0);
   const solde = (Number(settings.monthlyIncome) || 0) - depensesMois;
 
-  const chartData = useMemo(() => buildOverviewData(period, { transactions, avDeposits, expenses }, mode), [period, mode, transactions, avDeposits, expenses]);
+  const chartData = useMemo(() => buildOverviewData(period, offset, { transactions, avDeposits, expenses }, mode), [period, offset, mode, transactions, avDeposits, expenses]);
 
   const pieData = [
     { name: "Trade Republic", value: totalVerseTR, color: "#24504D" },
@@ -388,7 +412,7 @@ function AccueilTab({ data }) {
             <ModeToggle value={mode} onChange={setMode} />
           </div>
         </div>
-        <PeriodBar value={period} onChange={setPeriod} />
+        <PeriodNav period={period} onPeriodChange={setPeriod} offset={offset} onOffsetChange={setOffset} />
         <div className="bt-chart-wrap">
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
@@ -439,9 +463,9 @@ function AccueilTab({ data }) {
 
 /* ============================== PLACEMENTS ============================== */
 
-function buildPositionSeries(positions, selectedKeys, period) {
+function buildPositionSeries(positions, selectedKeys, period, offset) {
   const selected = positions.filter((p) => selectedKeys.has(p.key));
-  const buckets = bucketsForPeriod(period);
+  const buckets = bucketsForPeriod(period, offset);
   return buckets.map((b) => {
     const row = { label: b.label };
     let total = 0;
@@ -580,6 +604,7 @@ function DepositForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
 function PlacementsTab({ data, actions }) {
   const { deposits, transactions, testPrices, rules } = data;
   const [chartPeriod, setChartPeriod] = useState("tout");
+  const [chartOffset, setChartOffset] = useState(0);
   const [showTxForm, setShowTxForm] = useState(false);
   const [showDepositForm, setShowDepositForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -605,7 +630,7 @@ function PlacementsTab({ data, actions }) {
   const pvVsVerse = valeurEstimee - (totalVerseTR + totalVerseBinance);
 
   const sortedTx = useMemo(() => [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)), [transactions]);
-  const seriesData = useMemo(() => selectedKeys ? buildPositionSeries(positions, selectedKeys, chartPeriod) : [], [positions, selectedKeys, chartPeriod]);
+  const seriesData = useMemo(() => selectedKeys ? buildPositionSeries(positions, selectedKeys, chartPeriod, chartOffset) : [], [positions, selectedKeys, chartPeriod, chartOffset]);
 
   const toggleKey = (key) => setSelectedKeys((prev) => {
     const next = new Set(prev);
@@ -661,7 +686,7 @@ function PlacementsTab({ data, actions }) {
         <div className="bt-card-head"><h3>Évolution des positions (montant investi cumulé)</h3></div>
         {positions.length === 0 ? <EmptyState text="Ajoute des achats pour voir le graphique." /> : (
           <>
-            <PeriodBar value={chartPeriod} onChange={setChartPeriod} />
+            <PeriodNav period={chartPeriod} onPeriodChange={setChartPeriod} offset={chartOffset} onOffsetChange={setChartOffset} />
             <ResponsiveContainer width="100%" height={280}>
               <LineChart data={seriesData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--bt-border)" vertical={false} />
@@ -792,6 +817,7 @@ function AVForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
 function AVTab({ data, actions }) {
   const { avDeposits, rules } = data;
   const [chartPeriod, setChartPeriod] = useState("tout");
+  const [chartOffset, setChartOffset] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const avRules = rules.filter((r) => r.kind === "av");
@@ -802,13 +828,13 @@ function AVTab({ data, actions }) {
   const sortedDeposits = useMemo(() => [...avDeposits].sort((a, b) => new Date(b.date) - new Date(a.date)), [avDeposits]);
 
   const chartData = useMemo(() => {
-    const buckets = bucketsForPeriod(chartPeriod);
+    const buckets = bucketsForPeriod(chartPeriod, chartOffset);
     const sorted = [...avDeposits].sort((a, b) => new Date(a.date) - new Date(b.date));
     return buckets.map((b) => {
       const total = sorted.filter((d) => new Date(d.date) <= b.end).reduce((s, d) => s + Number(d.amount), 0);
       return { label: b.label, total };
     });
-  }, [avDeposits, chartPeriod]);
+  }, [avDeposits, chartPeriod, chartOffset]);
 
   return (
     <div className="bt-tab">
@@ -821,7 +847,7 @@ function AVTab({ data, actions }) {
         <div className="bt-card-head"><h3>Évolution des versements cumulés</h3></div>
         {avDeposits.length === 0 ? <EmptyState text="Ajoute ton premier versement pour voir le graphique." /> : (
           <>
-            <PeriodBar value={chartPeriod} onChange={setChartPeriod} />
+            <PeriodNav period={chartPeriod} onPeriodChange={setChartPeriod} offset={chartOffset} onOffsetChange={setChartOffset} />
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--bt-border)" vertical={false} />
@@ -960,6 +986,7 @@ function ExpenseForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
 function DepensesTab({ data, actions }) {
   const { expenses, settings, rules } = data;
   const [period, setPeriod] = useState("1m");
+  const [offset, setOffset] = useState(0);
   const [mode, setMode] = useState("eur");
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -975,19 +1002,19 @@ function DepensesTab({ data, actions }) {
   const variableMois = depensesMois.filter((e) => e.type === "variable").reduce((s, e) => s + Number(e.amount), 0);
   const solde = (Number(settings.monthlyIncome) || 0) - totalMois;
 
-  const filtered = useMemo(() => expenses.filter((e) => inPeriod(e.date, period)).sort((a, b) => new Date(b.date) - new Date(a.date)), [expenses, period]);
+  const filtered = useMemo(() => expenses.filter((e) => inPeriodRange(e.date, period, offset)).sort((a, b) => new Date(b.date) - new Date(a.date)), [expenses, period, offset]);
   const totalPeriode = filtered.reduce((s, e) => s + Number(e.amount), 0);
 
   const chartData = useMemo(() => {
-    const buckets = bucketsForPeriod(period);
+    const buckets = bucketsForPeriod(period, offset);
     return buckets.map((b) => {
       const inBucket = expenses.filter((e) => { const d = new Date(e.date); return d >= b.start && d <= b.end; });
       const fixe = inBucket.filter((e) => e.type === "fixe").reduce((s, e) => s + Number(e.amount), 0);
-      const extra = inBucket.filter((e) => e.type === "variable").reduce((s, e) => s + Number(e.amount), 0);
-      if (mode === "pct" && totalPeriode > 0) return { label: b.label, fixe: (fixe / totalPeriode) * 100, variable: (extra / totalPeriode) * 100 };
-      return { label: b.label, fixe, extra };
+      const variable = inBucket.filter((e) => e.type === "variable").reduce((s, e) => s + Number(e.amount), 0);
+      if (mode === "pct" && totalPeriode > 0) return { label: b.label, fixe: (fixe / totalPeriode) * 100, variable: (variable / totalPeriode) * 100 };
+      return { label: b.label, fixe, variable };
     });
-  }, [expenses, period, mode, totalPeriode]);
+  }, [expenses, period, offset, mode, totalPeriode]);
 
   const catData = useMemo(() => {
     const map = {};
@@ -1016,7 +1043,7 @@ function DepensesTab({ data, actions }) {
             <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowForm(true)}><Plus size={16} /> Ajouter</button>
           </div>
         </div>
-        <PeriodBar value={period} onChange={setPeriod} />
+        <PeriodNav period={period} onPeriodChange={setPeriod} offset={offset} onOffsetChange={setOffset} />
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--bt-border)" vertical={false} />
@@ -1409,6 +1436,12 @@ export default function App() {
 
         .bt-segment { display: inline-flex; background: var(--bt-surface-alt); border-radius: 10px; padding: 3px; gap: 2px; flex-wrap: wrap; margin-bottom: 14px; }
         .bt-segment-sm { margin-bottom: 0; }
+        .bt-period-nav { margin-bottom: 14px; }
+        .bt-period-window { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+        .bt-period-window span { font-family: 'Space Mono', monospace; font-size: 12.5px; color: var(--bt-ink-soft); font-weight: 600; }
+        .bt-period-window .bt-icon-btn { background: var(--bt-surface-alt); border-radius: 8px; width: 30px; height: 30px; }
+        .bt-period-window .bt-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .bt-period-window .bt-icon-btn:disabled:hover { background: var(--bt-surface-alt); }
         .bt-segment-btn { border: none; background: transparent; padding: 7px 12px; border-radius: 8px; font-size: 13px; color: var(--bt-ink-soft); font-weight: 500; }
         .bt-segment-btn.active { background: var(--bt-surface); color: var(--bt-teal); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
 
