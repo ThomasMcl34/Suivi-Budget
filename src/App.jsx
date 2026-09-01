@@ -99,6 +99,13 @@ function bucketsForPeriod(period, offset = 0) {
   return buckets.length ? buckets : [{ label: "—", start, end }];
 }
 
+function formatQty(n) {
+  const num = Number(n);
+  if (!isFinite(num)) return "0";
+  if (Number.isInteger(num)) return String(num);
+  return num.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 function formatAxisEur(v) {
   if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(Math.round(v) % 1000 === 0 ? 0 : 1)}k€`;
   return `${Math.round(v)}€`;
@@ -182,24 +189,36 @@ function RecurringList({ rules, onDelete }) {
   );
 }
 
-function computePositions(transactions, testPrices) {
+function computePositions(transactions, sales, testPrices) {
   const map = new Map();
   transactions.forEach((t) => {
     const key = `${t.platform}|${t.category}|${t.name}`;
-    if (!map.has(key)) map.set(key, { key, platform: t.platform, category: t.category, name: t.name, qty: 0, invested: 0, txs: [] });
+    if (!map.has(key)) map.set(key, { key, platform: t.platform, category: t.category, name: t.name, boughtQty: 0, boughtCost: 0, soldQty: 0, soldProceeds: 0, txs: [], sells: [] });
     const p = map.get(key);
-    p.qty += Number(t.quantity);
-    p.invested += Number(t.quantity) * Number(t.price);
+    p.boughtQty += Number(t.quantity);
+    p.boughtCost += Number(t.quantity) * Number(t.price);
     p.txs.push(t);
   });
+  sales.forEach((s) => {
+    const key = `${s.platform}|${s.category}|${s.name}`;
+    if (!map.has(key)) map.set(key, { key, platform: s.platform, category: s.category, name: s.name, boughtQty: 0, boughtCost: 0, soldQty: 0, soldProceeds: 0, txs: [], sells: [] });
+    const p = map.get(key);
+    p.soldQty += Number(s.quantity);
+    p.soldProceeds += Number(s.quantity) * Number(s.salePrice);
+    p.sells.push(s);
+  });
   return Array.from(map.values()).map((p) => {
-    const avgPrice = p.qty > 0 ? p.invested / p.qty : 0;
+    const avgPrice = p.boughtQty > 0 ? p.boughtCost / p.boughtQty : 0;
+    const qty = Math.max(0, p.boughtQty - p.soldQty);
+    const invested = qty * avgPrice;
+    const soldCostBasis = p.soldQty * avgPrice;
+    const realizedPL = p.soldProceeds - soldCostBasis;
     const testPrice = testPrices[p.key];
     const hasTest = testPrice !== undefined && testPrice !== null && testPrice !== "";
-    const testValue = hasTest ? Number(testPrice) * p.qty : null;
-    const pv = hasTest ? testValue - p.invested : null;
-    const pvPct = hasTest && p.invested > 0 ? (pv / p.invested) * 100 : null;
-    return { ...p, avgPrice, testPrice: hasTest ? testPrice : "", hasTest, testValue, pv, pvPct };
+    const testValue = hasTest ? Number(testPrice) * qty : null;
+    const pv = hasTest ? testValue - invested : null;
+    const pvPct = hasTest && invested > 0 ? (pv / invested) * 100 : null;
+    return { ...p, qty, avgPrice, invested, soldCostBasis, realizedPL, testPrice: hasTest ? testPrice : "", hasTest, testValue, pv, pvPct };
   }).sort((a, b) => b.invested - a.invested);
 }
 
@@ -349,7 +368,7 @@ function buildOverviewData(period, offset, { transactions, avDeposits, expenses 
 }
 
 function AccueilTab({ data }) {
-  const { deposits, transactions, testPrices, avDeposits, expenses, settings } = data;
+  const { deposits, transactions, sales, testPrices, avDeposits, expenses, settings } = data;
   const [period, setPeriod] = useState("1m");
   const [offset, setOffset] = useState(0);
   const [mode, setMode] = useState("eur");
@@ -361,7 +380,7 @@ function AccueilTab({ data }) {
   const totalInvesti = useMemo(() => transactions.reduce((s, t) => s + Number(t.quantity) * Number(t.price), 0), [transactions]);
   const patrimoineTotal = totalVerseTR + totalVerseBinance + totalVerseAV;
 
-  const positions = useMemo(() => computePositions(transactions, testPrices), [transactions, testPrices]);
+  const positions = useMemo(() => computePositions(transactions, sales, testPrices).filter((p) => p.qty > 1e-9), [transactions, sales, testPrices]);
   const testedPositions = positions.filter((p) => p.hasTest);
   const pvGlobale = testedPositions.reduce((s, p) => s + p.pv, 0);
   const investiTeste = testedPositions.reduce((s, p) => s + p.invested, 0);
@@ -513,19 +532,23 @@ function TransactionForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
   const [category, setCategory] = useState("ETF");
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [amount, setAmount] = useState("");
   const [price, setPrice] = useState("");
   const [date, setDate] = useState(todayStr());
   const [mode, setMode] = useState("ponctuel");
   const [freqValue, setFreqValue] = useState("1");
   const [freqUnit, setFreqUnit] = useState("mois");
-  const valid = name.trim() && Number(quantity) > 0 && Number(price) > 0 && (mode === "ponctuel" || Number(freqValue) > 0);
+  const isCrypto = category === "Crypto";
+  const computedQty = isCrypto && Number(price) > 0 ? Number(amount) / Number(price) : Number(quantity);
+  const valid = name.trim() && Number(price) > 0 && (isCrypto ? Number(amount) > 0 : Number(quantity) > 0) && (mode === "ponctuel" || Number(freqValue) > 0);
   const previewCount = useMemo(() => {
     if (mode !== "periodique" || !Number(freqValue)) return 0;
     return computeDueDates({ lastGeneratedDate: null, startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit }, todayStr()).length;
   }, [mode, freqValue, freqUnit, date]);
   const handleSubmit = () => {
-    if (mode === "ponctuel") onSubmitOnce({ id: uid(), platform, category, name: name.trim(), quantity: Number(quantity), price: Number(price), date });
-    else onSubmitRecurring({ id: uid(), kind: "transaction", active: true, platform, category, name: name.trim(), quantity: Number(quantity), price: Number(price), startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit, lastGeneratedDate: null });
+    const qty = isCrypto ? Number(amount) / Number(price) : Number(quantity);
+    if (mode === "ponctuel") onSubmitOnce({ id: uid(), platform, category, name: name.trim(), quantity: qty, price: Number(price), date });
+    else onSubmitRecurring({ id: uid(), kind: "transaction", active: true, platform, category, name: name.trim(), quantity: qty, price: Number(price), startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit, lastGeneratedDate: null });
   };
   return (
     <div className="bt-form">
@@ -542,22 +565,105 @@ function TransactionForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
       <FieldRow label="Nom (ex : MSCI World, Apple, Bitcoin...)">
         <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom de l'actif" />
       </FieldRow>
-      <div className="bt-form-row">
-        <FieldRow label="Quantité">
-          <input type="number" min="0" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
-        </FieldRow>
-        <FieldRow label="Prix unitaire (€)">
-          <input type="number" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
-        </FieldRow>
-      </div>
+      {isCrypto ? (
+        <div className="bt-form-row">
+          <FieldRow label="Montant investi (€)">
+            <input type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+          </FieldRow>
+          <FieldRow label="Prix de la crypto (€)">
+            <input type="number" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
+          </FieldRow>
+        </div>
+      ) : (
+        <div className="bt-form-row">
+          <FieldRow label="Quantité">
+            <input type="number" min="0" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+          </FieldRow>
+          <FieldRow label="Prix unitaire (€)">
+            <input type="number" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
+          </FieldRow>
+        </div>
+      )}
       <RecurrenceToggle mode={mode} setMode={setMode} freqValue={freqValue} setFreqValue={setFreqValue} freqUnit={freqUnit} setFreqUnit={setFreqUnit} startDate={date} previewCount={previewCount} />
       <FieldRow label={mode === "ponctuel" ? "Date" : "Premier achat le"}>
         <input type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} />
       </FieldRow>
-      {quantity && price && <div className="bt-form-preview">Montant investi {mode === "periodique" ? "(par occurrence)" : ""} : <strong>{eur(Number(quantity) * Number(price))}</strong></div>}
+      {isCrypto
+        ? (amount && price && Number(price) > 0 && <div className="bt-form-preview">Quantité obtenue : <strong>≈ {computedQty.toFixed(8).replace(/0+$/, "").replace(/\.$/, "")}</strong> unité(s)</div>)
+        : (quantity && price && <div className="bt-form-preview">Montant investi {mode === "periodique" ? "(par occurrence)" : ""} : <strong>{eur(Number(quantity) * Number(price))}</strong></div>)
+      }
       <div className="bt-modal-actions">
         <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
         <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>{mode === "ponctuel" ? "Ajouter l'achat" : "Créer l'achat périodique"}</button>
+      </div>
+    </div>
+  );
+}
+
+function SellForm({ position, onSubmit, onCancel }) {
+  const isCrypto = position.category === "Crypto";
+  const [quantity, setQuantity] = useState(String(position.qty));
+  const [amount, setAmount] = useState("");
+  const [salePrice, setSalePrice] = useState("");
+  const [date, setDate] = useState(todayStr());
+
+  const maxAmount = isCrypto && Number(salePrice) > 0 ? position.qty * Number(salePrice) : null;
+  const qtyNum = isCrypto
+    ? (Number(salePrice) > 0 && Number(amount) > 0 ? Number(amount) / Number(salePrice) : 0)
+    : Number(quantity);
+
+  const valid = qtyNum > 0 && qtyNum <= position.qty + 1e-9 && Number(salePrice) > 0 && (!isCrypto || Number(amount) > 0);
+  const proceeds = qtyNum > 0 && salePrice ? qtyNum * Number(salePrice) : 0;
+  const costBasis = qtyNum > 0 ? qtyNum * position.avgPrice : 0;
+  const pl = proceeds - costBasis;
+
+  const sellAll = () => {
+    if (isCrypto) { if (maxAmount !== null) setAmount(maxAmount.toFixed(2)); }
+    else setQuantity(String(position.qty));
+  };
+
+  return (
+    <div className="bt-form">
+      <div className="bt-form-preview">{position.name} — {formatQty(position.qty)} unité(s) disponible(s) · PRU {eur(position.avgPrice)}</div>
+      {isCrypto ? (
+        <>
+          <FieldRow label="Prix de vente (€)">
+            <input type="number" min="0" step="any" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="0.00" />
+          </FieldRow>
+          <FieldRow label="Montant à vendre (€)">
+            <input type="number" min="0" max={maxAmount ?? undefined} step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+          </FieldRow>
+          {maxAmount !== null && (
+            <button className="bt-link-btn" onClick={sellAll}>Vendre la totalité (max {eur(maxAmount)})</button>
+          )}
+          {Number(amount) > (maxAmount ?? Infinity) + 1e-9 && (
+            <div className="bt-form-warning">Tu ne possèdes que {formatQty(position.qty)} unité(s) — à ce prix, le montant maximum vendable est {eur(maxAmount)}.</div>
+          )}
+        </>
+      ) : (
+        <>
+          <FieldRow label="Quantité à vendre">
+            <input type="number" min="0" max={position.qty} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+          </FieldRow>
+          <button className="bt-link-btn" onClick={sellAll}>Vendre la totalité ({formatQty(position.qty)})</button>
+          <FieldRow label="Prix de vente unitaire (€)">
+            <input type="number" min="0" step="any" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="0.00" />
+          </FieldRow>
+        </>
+      )}
+      <FieldRow label="Date">
+        <input type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} />
+      </FieldRow>
+      {qtyNum > 0 && salePrice && (
+        <div className="bt-form-preview">
+          {isCrypto && <>Quantité vendue : <strong>≈ {formatQty(qtyNum)}</strong><br /></>}
+          Produit de la vente : <strong>{eur(proceeds)}</strong><br />
+          Plus-value réalisée : <DeltaPill value={pl} />
+        </div>
+      )}
+      <div className="bt-modal-actions">
+        <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
+        <button className="bt-btn-primary" disabled={!valid} onClick={() => onSubmit({ id: uid(), platform: position.platform, category: position.category, name: position.name, quantity: qtyNum, salePrice: Number(salePrice), date })}>Enregistrer la vente</button>
       </div>
     </div>
   );
@@ -602,18 +708,20 @@ function DepositForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
 }
 
 function PlacementsTab({ data, actions }) {
-  const { deposits, transactions, testPrices, rules } = data;
+  const { deposits, transactions, sales, testPrices, rules } = data;
   const [chartPeriod, setChartPeriod] = useState("tout");
   const [chartOffset, setChartOffset] = useState(0);
   const [showTxForm, setShowTxForm] = useState(false);
   const [showDepositForm, setShowDepositForm] = useState(false);
+  const [sellPosition, setSellPosition] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [selectedKeys, setSelectedKeys] = useState(null);
 
   const depositRules = rules.filter((r) => r.kind === "deposit");
   const transactionRules = rules.filter((r) => r.kind === "transaction");
 
-  const positions = useMemo(() => computePositions(transactions, testPrices), [transactions, testPrices]);
+  const positions = useMemo(() => computePositions(transactions, sales, testPrices), [transactions, sales, testPrices]);
+  const openPositions = positions.filter((p) => p.qty > 1e-9);
 
   useEffect(() => {
     if (selectedKeys === null && positions.length) setSelectedKeys(new Set(positions.map((p) => p.key)));
@@ -621,15 +729,22 @@ function PlacementsTab({ data, actions }) {
 
   const totalVerseTR = deposits.filter((d) => d.platform === "traderepublic").reduce((s, d) => s + Number(d.amount), 0);
   const totalVerseBinance = deposits.filter((d) => d.platform === "binance").reduce((s, d) => s + Number(d.amount), 0);
-  const totalInvesti = transactions.reduce((s, t) => s + Number(t.quantity) * Number(t.price), 0);
+  const totalVerse = totalVerseTR + totalVerseBinance;
 
-  const tested = positions.filter((p) => p.hasTest);
-  const pvVsInvesti = tested.reduce((s, p) => s + p.pv, 0);
-  const investiTeste = tested.reduce((s, p) => s + p.invested, 0);
-  const valeurEstimee = tested.reduce((s, p) => s + p.testValue, 0) + positions.filter((p) => !p.hasTest).reduce((s, p) => s + p.invested, 0);
-  const pvVsVerse = valeurEstimee - (totalVerseTR + totalVerseBinance);
+  const totalAchats = transactions.reduce((s, t) => s + Number(t.quantity) * Number(t.price), 0);
+  const totalVentes = sales.reduce((s, v) => s + Number(v.quantity) * Number(v.salePrice), 0);
+
+  const valeurMarche = openPositions.reduce((s, p) => s + (p.hasTest ? p.testValue : p.invested), 0);
+  const nonSimulees = openPositions.filter((p) => !p.hasTest).length;
+  const liquidites = totalVerse - totalAchats + totalVentes;
+
+  const investiActuel = openPositions.reduce((s, p) => s + p.invested, 0);
+  const testedOpen = openPositions.filter((p) => p.hasTest);
+  const pvLatente = testedOpen.reduce((s, p) => s + p.pv, 0);
+  const pvRealisee = positions.reduce((s, p) => s + p.realizedPL, 0);
 
   const sortedTx = useMemo(() => [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)), [transactions]);
+  const sortedSales = useMemo(() => [...sales].sort((a, b) => new Date(b.date) - new Date(a.date)), [sales]);
   const seriesData = useMemo(() => selectedKeys ? buildPositionSeries(positions, selectedKeys, chartPeriod, chartOffset) : [], [positions, selectedKeys, chartPeriod, chartOffset]);
 
   const toggleKey = (key) => setSelectedKeys((prev) => {
@@ -641,10 +756,15 @@ function PlacementsTab({ data, actions }) {
   return (
     <div className="bt-tab">
       <div className="bt-grid-stats">
-        <StatCard label="Versé Trade Republic" value={eur(totalVerseTR)} />
-        <StatCard label="Versé Binance" value={eur(totalVerseBinance)} />
-        <StatCard label="Total investi" value={eur(totalInvesti)} sub={`${positions.length} position(s)`} />
-        <StatCard label="PV vs investi / vs versé" value={tested.length ? signedEur(pvVsInvesti) : "—"} sub={tested.length ? `vs versé : ${signedEur(pvVsVerse)}` : `${positions.length} non simulée(s)`} tone={tested.length ? (pvVsInvesti >= 0 ? "pos" : "neg") : undefined} />
+        <StatCard label="Versé depuis ma banque" value={eur(totalVerse)} sub={`TR ${eur(totalVerseTR)} · Binance ${eur(totalVerseBinance)}`} />
+        <StatCard label="Valeur des actifs sur les marchés" value={eur(valeurMarche)} sub={nonSimulees > 0 ? `${nonSimulees} position(s) non simulée(s), valorisée(s) au coût` : `${openPositions.length} position(s) ouverte(s)`} />
+        <StatCard label="Liquidités non réinvesties" value={eur(liquidites)} sub="Versé − investi + produit des ventes" tone={liquidites < 0 ? "neg" : undefined} />
+        <StatCard
+          label="Plus-value latente / réalisée"
+          value={testedOpen.length ? signedEur(pvLatente) : "—"}
+          sub={<>Réalisée (ventes) : <span className={pvRealisee > 0 ? "bt-text-pos" : pvRealisee < 0 ? "bt-text-neg" : ""}>{signedEur(pvRealisee)}</span></>}
+          tone={testedOpen.length ? (pvLatente >= 0 ? "pos" : "neg") : undefined}
+        />
       </div>
 
       <div className="bt-card">
@@ -652,9 +772,9 @@ function PlacementsTab({ data, actions }) {
           <h3>Mes positions</h3>
           <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowTxForm(true)}><Plus size={16} /> Ajouter un achat</button>
         </div>
-        {positions.length === 0 ? <EmptyState text="Aucune position pour l'instant. Ajoute ton premier achat." /> : (
+        {openPositions.length === 0 ? <EmptyState text="Aucune position ouverte pour l'instant. Ajoute ton premier achat." /> : (
           <div className="bt-positions">
-            {positions.map((p, i) => (
+            {openPositions.map((p, i) => (
               <div className="bt-position-row" key={p.key}>
                 <div className="bt-position-check">
                   <input type="checkbox" checked={selectedKeys ? selectedKeys.has(p.key) : true} onChange={() => toggleKey(p.key)} style={{ accentColor: POSITION_COLORS[i % POSITION_COLORS.length] }} />
@@ -666,7 +786,7 @@ function PlacementsTab({ data, actions }) {
                     <span className="bt-tag">{p.category}</span>
                     <span className="bt-tag bt-tag-alt">{PLATFORMS.find((pl) => pl.id === p.platform)?.label}</span>
                   </div>
-                  <div className="bt-position-sub">{p.qty} unités · PRU {eur(p.avgPrice)} · investi {eur(p.invested)}</div>
+                  <div className="bt-position-sub">{formatQty(p.qty)} unités · PRU {eur(p.avgPrice)} · investi {eur(p.invested)}{p.realizedPL !== 0 ? ` · déjà réalisé : ${signedEur(p.realizedPL)}` : ""}</div>
                 </div>
                 <div className="bt-position-test">
                   <label>Prix test (€)</label>
@@ -676,6 +796,7 @@ function PlacementsTab({ data, actions }) {
                   <DeltaPill value={p.pv} />
                   {p.pvPct !== null && <DeltaPill value={p.pvPct} mode="pct" size="sm" />}
                 </div>
+                <button className="bt-btn-ghost bt-btn-sm" onClick={() => setSellPosition(p)}>Vendre</button>
               </div>
             ))}
           </div>
@@ -725,6 +846,28 @@ function PlacementsTab({ data, actions }) {
       </div>
 
       <div className="bt-card">
+        <div className="bt-card-head"><h3>Historique des ventes</h3></div>
+        {sortedSales.length === 0 ? <EmptyState text="Aucune vente pour l'instant." /> : (
+          <ul className="bt-list bt-list-scroll">
+            {sortedSales.map((v) => {
+              const pos = positions.find((p) => p.key === `${v.platform}|${v.category}|${v.name}`);
+              const pl = v.quantity * v.salePrice - v.quantity * (pos ? pos.avgPrice : 0);
+              return (
+                <li key={v.id}>
+                  <div className="bt-list-main">
+                    <span className="bt-list-title">{v.name} <span className="bt-tag">{v.category}</span></span>
+                    <span className="bt-list-sub">{v.quantity} × {eur(v.salePrice)} · {PLATFORMS.find((p) => p.id === v.platform)?.label} · {new Date(v.date).toLocaleDateString("fr-FR")}</span>
+                  </div>
+                  <div className="bt-list-amount"><DeltaPill value={pl} size="sm" /></div>
+                  <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "sale", id: v.id })}><Trash2 size={16} /></button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <div className="bt-card">
         <div className="bt-card-head">
           <h3>Versements par plateforme</h3>
           <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowDepositForm(true)}><Plus size={16} /> Ajouter</button>
@@ -760,14 +903,24 @@ function PlacementsTab({ data, actions }) {
           onCancel={() => setShowDepositForm(false)}
         />
       </Modal>
+      <Modal open={!!sellPosition} title={sellPosition ? `Vendre — ${sellPosition.name}` : ""} onClose={() => setSellPosition(null)}>
+        {sellPosition && (
+          <SellForm
+            position={sellPosition}
+            onSubmit={(sale) => { actions.addSale(sale); setSellPosition(null); }}
+            onCancel={() => setSellPosition(null)}
+          />
+        )}
+      </Modal>
       <ConfirmDialog
         open={!!confirmDelete}
-        title={confirmDelete?.type === "rule" ? "Arrêter cette récurrence ?" : "Supprimer cet élément ?"}
-        message={confirmDelete?.type === "rule" ? "Les versements déjà effectués restent enregistrés. Seules les prochaines échéances automatiques seront arrêtées." : "Cette action est définitive et ne peut pas être annulée."}
+        title={confirmDelete?.type === "rule" ? "Arrêter cette récurrence ?" : confirmDelete?.type === "sale" ? "Supprimer cette vente ?" : "Supprimer cet élément ?"}
+        message={confirmDelete?.type === "rule" ? "Les versements déjà effectués restent enregistrés. Seules les prochaines échéances automatiques seront arrêtées." : confirmDelete?.type === "sale" ? "Les unités vendues redeviendront comptées comme détenues. Cette action est définitive." : "Cette action est définitive et ne peut pas être annulée."}
         onCancel={() => setConfirmDelete(null)}
         onConfirm={() => {
           if (confirmDelete.type === "tx") actions.deleteTransaction(confirmDelete.id);
           else if (confirmDelete.type === "deposit") actions.deleteDeposit(confirmDelete.id);
+          else if (confirmDelete.type === "sale") actions.deleteSale(confirmDelete.id);
           else if (confirmDelete.type === "rule") actions.deleteRecurringRule(confirmDelete.id);
           setConfirmDelete(null);
         }}
@@ -1280,6 +1433,7 @@ export default function App() {
   const [tab, setTab] = useState("accueil");
   const [deposits, setDeposits] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [sales, setSales] = useState([]);
   const [testPrices, setTestPrices] = useState({});
   const [avDeposits, setAvDeposits] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -1288,7 +1442,8 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const { deposits: loadedDeposits, transactions: loadedTx, testPrices: loadedTestPrices, avDeposits: loadedAV, expenses: loadedExpenses, settings: loadedSettings, rules: loadedRules } = await api.fetchAll();
+      const { deposits: loadedDeposits, transactions: loadedTx, sales: loadedSales, testPrices: loadedTestPrices, avDeposits: loadedAV, expenses: loadedExpenses, settings: loadedSettings, rules: loadedRules } = await api.fetchAll();
+      setSales(loadedSales);
 
       setTestPrices(loadedTestPrices);
       setSettings(loadedSettings);
@@ -1321,6 +1476,8 @@ export default function App() {
     deleteDeposit: (id) => { setDeposits((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("deposits", id); },
     addTransaction: (t) => { setTransactions((prev) => [...prev, t]); api.insertTransactions([t]); },
     deleteTransaction: (id) => { setTransactions((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("transactions", id); },
+    addSale: (v) => { setSales((prev) => [...prev, v]); api.insertSales([v]); },
+    deleteSale: (id) => { setSales((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("sales", id); },
     setTestPrice: (key, value) => { setTestPrices((prev) => ({ ...prev, [key]: value === "" ? "" : Number(value) })); api.upsertTestPrice(key, value); },
     addAVDeposit: (d) => { setAvDeposits((prev) => [...prev, d]); api.insertAVDeposits([d]); },
     deleteAVDeposit: (id) => { setAvDeposits((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("av_deposits", id); },
@@ -1346,7 +1503,7 @@ export default function App() {
     deleteRecurringRule: (id) => { setRules((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("recurring_rules", id); },
   };
 
-  const data = { deposits, transactions, testPrices, avDeposits, expenses, settings, rules };
+  const data = { deposits, transactions, sales, testPrices, avDeposits, expenses, settings, rules };
 
   return (
     <div className="bt-app">
@@ -1488,6 +1645,7 @@ export default function App() {
         .bt-position-test label { font-size: 11px; color: var(--bt-ink-soft); }
         .bt-position-test input { width: 110px; padding: 7px 9px; border: 1px solid var(--bt-border); border-radius: 8px; font-size: 13px; background: var(--bt-bg); }
         .bt-position-pv { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+        .bt-position-row .bt-btn-ghost.bt-btn-sm { white-space: nowrap; }
 
         .bt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
         .bt-list-scroll { max-height: 320px; overflow-y: auto; }
@@ -1538,6 +1696,7 @@ export default function App() {
         .bt-field input, .bt-field select { padding: 10px 11px; border: 1px solid var(--bt-border); border-radius: 9px; font-size: 14px; color: var(--bt-ink); background: var(--bt-bg); }
         .bt-field input:focus, .bt-field select:focus { outline: 2px solid var(--bt-teal); outline-offset: 1px; }
         .bt-form-preview { font-size: 13px; background: var(--bt-teal-soft); color: var(--bt-teal); padding: 8px 12px; border-radius: 9px; }
+        .bt-form-warning { font-size: 12.5px; background: var(--bt-red-soft); color: var(--bt-red); padding: 8px 12px; border-radius: 9px; line-height: 1.4; }
         .bt-form-preview-recurring { display: flex; align-items: flex-start; gap: 7px; background: var(--bt-amber-soft); color: var(--bt-amber); line-height: 1.4; }
         .bt-form-preview-recurring svg { flex-shrink: 0; margin-top: 2px; }
         .bt-freq-row { display: flex; align-items: center; gap: 8px; }
