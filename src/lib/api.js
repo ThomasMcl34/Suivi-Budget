@@ -11,6 +11,9 @@ const fromDepositRow = (r) => ({ id: r.id, platform: r.platform, amount: Number(
 const toTransactionRow = (t) => ({ id: t.id, platform: t.platform, category: t.category, name: t.name, quantity: t.quantity, price: t.price, date: t.date, recurring_id: t.recurringId || null });
 const fromTransactionRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), price: Number(r.price), date: r.date, ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
 
+const toSaleRow = (v) => ({ id: v.id, platform: v.platform, category: v.category, name: v.name, quantity: v.quantity, sale_price: v.salePrice, date: v.date });
+const fromSaleRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), salePrice: Number(r.sale_price), date: r.date });
+
 const toAVRow = (d) => ({ id: d.id, amount: d.amount, date: d.date, note: d.note || null, recurring_id: d.recurringId || null });
 const fromAVRow = (r) => ({ id: r.id, amount: Number(r.amount), date: r.date, note: r.note || "", ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
 
@@ -55,9 +58,10 @@ const fromRuleRow = (r) => ({
 /* ============================== LECTURE ============================== */
 
 export async function fetchAll() {
-  const [depositsRes, txRes, tpRes, avRes, exRes, settingsRes, rulesRes] = await Promise.all([
+  const [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes] = await Promise.all([
     supabase.from("deposits").select("*"),
     supabase.from("transactions").select("*"),
+    supabase.from("sales").select("*"),
     supabase.from("test_prices").select("*"),
     supabase.from("av_deposits").select("*"),
     supabase.from("expenses").select("*"),
@@ -65,7 +69,7 @@ export async function fetchAll() {
     supabase.from("recurring_rules").select("*"),
   ]);
 
-  [depositsRes, txRes, tpRes, avRes, exRes, settingsRes, rulesRes].forEach((res) => {
+  [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes].forEach((res) => {
     if (res.error) console.error("Erreur de lecture Supabase :", res.error);
   });
 
@@ -77,6 +81,7 @@ export async function fetchAll() {
   return {
     deposits: (depositsRes.data || []).map(fromDepositRow),
     transactions: (txRes.data || []).map(fromTransactionRow),
+    sales: (salesRes.data || []).map(fromSaleRow),
     testPrices,
     avDeposits: (avRes.data || []).map(fromAVRow),
     expenses: (exRes.data || []).map(fromExpenseRow),
@@ -100,6 +105,7 @@ export async function deleteRow(table, id) {
 
 export const insertDeposits = (rows) => insertRows("deposits", rows, toDepositRow);
 export const insertTransactions = (rows) => insertRows("transactions", rows, toTransactionRow);
+export const insertSales = (rows) => insertRows("sales", rows, toSaleRow);
 export const insertAVDeposits = (rows) => insertRows("av_deposits", rows, toAVRow);
 export const insertExpenses = (rows) => insertRows("expenses", rows, toExpenseRow);
 
