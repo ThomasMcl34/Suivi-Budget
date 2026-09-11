@@ -8,8 +8,8 @@ import { supabase } from "./supabaseClient.js";
 const toDepositRow = (d) => ({ id: d.id, platform: d.platform, amount: d.amount, date: d.date, recurring_id: d.recurringId || null });
 const fromDepositRow = (r) => ({ id: r.id, platform: r.platform, amount: Number(r.amount), date: r.date, ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
 
-const toTransactionRow = (t) => ({ id: t.id, platform: t.platform, category: t.category, name: t.name, quantity: t.quantity, price: t.price, date: t.date, recurring_id: t.recurringId || null });
-const fromTransactionRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), price: Number(r.price), date: r.date, ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
+const toTransactionRow = (t) => ({ id: t.id, platform: t.platform, category: t.category, name: t.name, quantity: t.quantity, price: t.price, date: t.date, symbol: t.symbol || null, recurring_id: t.recurringId || null });
+const fromTransactionRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), price: Number(r.price), date: r.date, ...(r.symbol ? { symbol: r.symbol } : {}), ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
 
 const toSaleRow = (v) => ({ id: v.id, platform: v.platform, category: v.category, name: v.name, quantity: v.quantity, sale_price: v.salePrice, date: v.date });
 const fromSaleRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), salePrice: Number(r.sale_price), date: r.date });
@@ -123,4 +123,21 @@ export async function upsertTestPrice(key, price) {
 export async function upsertSettings(monthlyIncome) {
   const { error } = await supabase.from("settings").upsert({ id: 1, monthly_income: monthlyIncome });
   if (error) console.error("Échec upsert paramètres :", error);
+}
+
+/* ============================== PRIX EN DIRECT ============================== */
+
+export async function fetchLivePrices(positions) {
+  const payload = positions
+    .filter((p) => p.symbol)
+    .map((p) => ({ symbol: p.symbol, category: p.category }));
+  if (!payload.length) return { prices: {}, meta: { marketOpen: true, quotaReached: false, updatedAt: new Date().toISOString() } };
+  try {
+    const { data, error } = await supabase.functions.invoke("get-prices", { body: { positions: payload } });
+    if (error) { console.error("Échec récupération des prix en direct :", error); return { prices: {}, meta: {} }; }
+    return data || { prices: {}, meta: {} };
+  } catch (e) {
+    console.error("Échec récupération des prix en direct :", e);
+    return { prices: {}, meta: {} };
+  }
 }
