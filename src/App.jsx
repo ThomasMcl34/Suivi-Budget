@@ -557,24 +557,24 @@ function buildPositionSeries(positions, selectedKeys, period, offset, livePrices
     return row;
   });
 
-  // Prolongement en pointillés jusqu'à la valeur de marché actuelle (uniquement si on regarde la période la plus récente)
+  // Ligne en pointillés = valeur de marché actuelle, constante depuis le moment où la position
+  // a atteint sa taille actuelle jusqu'à aujourd'hui (bien visible, décalée de la ligne investie).
   if (offset === 0 && rows.length) {
     const last = rows.length - 1;
-    const prev = Math.max(0, last - 1);
-    let liveTotal = 0;
-    let hasAnyLive = false;
+    let globalStart = null;
     selected.forEach((p) => {
-      const live = p.symbol && livePrices[p.symbol] != null ? Number(livePrices[p.symbol]) * p.qty : null;
-      if (live !== null) {
-        hasAnyLive = true;
-        rows[prev][`${p.key}__live`] = rows[prev][p.key];
-        rows[last][`${p.key}__live`] = live;
-        liveTotal += live;
-      }
+      if (!p.symbol || livePrices[p.symbol] == null) return;
+      const liveVal = Number(livePrices[p.symbol]) * p.qty;
+      const finalInvested = rows[last][p.key];
+      let startIdx = rows.findIndex((r) => Math.abs(r[p.key] - finalInvested) < 1e-9);
+      if (startIdx === -1) startIdx = last;
+      for (let i = startIdx; i <= last; i++) rows[i][`${p.key}__live`] = liveVal;
+      if (globalStart === null || startIdx < globalStart) globalStart = startIdx;
     });
-    if (hasAnyLive) {
-      rows[prev].total__live = rows[prev].total;
-      rows[last].total__live = liveTotal + selected.reduce((s, p) => s + (p.symbol && livePrices[p.symbol] != null ? 0 : rows[last][p.key] || 0), 0);
+    if (globalStart !== null) {
+      for (let i = globalStart; i <= last; i++) {
+        rows[i].total__live = selected.reduce((s, p) => s + (rows[i][`${p.key}__live`] !== undefined ? rows[i][`${p.key}__live`] : rows[i][p.key]), 0);
+      }
     }
   }
   return rows;
@@ -986,7 +986,7 @@ function PlacementsTab({ data, actions }) {
                   );
                 })}
                 <Line dataKey="total" name="Total" stroke="var(--bt-ink)" strokeWidth={2} strokeDasharray="5 3" dot={false} type="monotone" />
-                {showLiveOverlay && <Line dataKey="total__live" legendType="none" stroke="var(--bt-ink)" strokeWidth={2} strokeDasharray="2 2" dot={false} connectNulls type="monotone" />}
+                {showLiveOverlay && <Line dataKey="total__live" legendType="none" stroke="var(--bt-ink)" strokeWidth={2} strokeDasharray="1 4" dot={false} connectNulls type="monotone" />}
               </LineChart>
             </ResponsiveContainer>
           </>
