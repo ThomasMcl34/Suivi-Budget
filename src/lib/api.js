@@ -103,8 +103,20 @@ export async function deleteRow(table, id) {
   if (error) console.error(`Échec suppression ${table} :`, error);
 }
 
+async function updateRow(table, id, row) {
+  const { error } = await supabase.from(table).update(row).eq("id", id);
+  if (error) console.error(`Échec mise à jour ${table} :`, error);
+}
+
 export const insertDeposits = (rows) => insertRows("deposits", rows, toDepositRow);
 export const insertTransactions = (rows) => insertRows("transactions", rows, toTransactionRow);
+
+export const updateTransaction = (tx) => updateRow("transactions", tx.id, toTransactionRow(tx));
+export const updateDeposit = (d) => updateRow("deposits", d.id, toDepositRow(d));
+export const updateAVDeposit = (d) => updateRow("av_deposits", d.id, toAVRow(d));
+export const updateExpense = (e) => updateRow("expenses", e.id, toExpenseRow(e));
+export const updateSale = (v) => updateRow("sales", v.id, toSaleRow(v));
+
 export const insertSales = (rows) => insertRows("sales", rows, toSaleRow);
 export const insertAVDeposits = (rows) => insertRows("av_deposits", rows, toAVRow);
 export const insertExpenses = (rows) => insertRows("expenses", rows, toExpenseRow);
