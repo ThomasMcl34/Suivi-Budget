@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import {
   Home, TrendingUp, Umbrella, Receipt, BarChart3, Plus, Trash2, X,
-  ChevronLeft, ChevronRight, Wallet, AlertTriangle, Landmark, Loader2, Repeat,
+  ChevronLeft, ChevronRight, Wallet, AlertTriangle, Landmark, Loader2, Repeat, Pencil,
 } from "lucide-react";
 import * as api from "./lib/api.js";
 
@@ -609,32 +609,33 @@ function RecurrenceToggle({ mode, setMode, freqValue, setFreqValue, freqUnit, se
   );
 }
 
-function TransactionForm({ existingAssets = [], onSubmitOnce, onSubmitRecurring, onCancel }) {
-  const [platform, setPlatform] = useState("traderepublic");
-  const [category, setCategory] = useState("ETF");
-  const [name, setName] = useState("");
-  const [symbol, setSymbol] = useState("");
-  const [symbolTouched, setSymbolTouched] = useState(false);
-  const [quantity, setQuantity] = useState("");
-  const [amount, setAmount] = useState("");
-  const [price, setPrice] = useState("");
-  const [date, setDate] = useState(todayStr());
+function TransactionForm({ existingAssets = [], editingTx = null, onSubmitOnce, onSubmitEdit, onSubmitRecurring, onCancel }) {
+  const isEditing = !!editingTx;
+  const [platform, setPlatform] = useState(editingTx?.platform || "traderepublic");
+  const [category, setCategory] = useState(editingTx?.category || "ETF");
+  const [name, setName] = useState(editingTx?.name || "");
+  const [symbol, setSymbol] = useState(editingTx?.symbol || "");
+  const [symbolTouched, setSymbolTouched] = useState(isEditing);
+  const [quantity, setQuantity] = useState(editingTx && editingTx.category !== "Crypto" ? String(editingTx.quantity) : "");
+  const [amount, setAmount] = useState(editingTx && editingTx.category === "Crypto" ? String(editingTx.quantity * editingTx.price) : "");
+  const [price, setPrice] = useState(editingTx ? String(editingTx.price) : "");
+  const [date, setDate] = useState(editingTx?.date || todayStr());
   const [mode, setMode] = useState("ponctuel");
   const [freqValue, setFreqValue] = useState("1");
   const [freqUnit, setFreqUnit] = useState("mois");
   const isCrypto = category === "Crypto";
   const computedQty = isCrypto && Number(price) > 0 ? Number(amount) / Number(price) : Number(quantity);
-  const valid = name.trim() && Number(price) > 0 && (isCrypto ? Number(amount) > 0 : Number(quantity) > 0) && (mode === "ponctuel" || Number(freqValue) > 0);
+  const valid = name.trim() && Number(price) > 0 && (isCrypto ? Number(amount) > 0 : Number(quantity) > 0) && (isEditing || mode === "ponctuel" || Number(freqValue) > 0);
   const previewCount = useMemo(() => {
-    if (mode !== "periodique" || !Number(freqValue)) return 0;
+    if (isEditing || mode !== "periodique" || !Number(freqValue)) return 0;
     return computeDueDates({ lastGeneratedDate: null, startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit }, todayStr()).length;
-  }, [mode, freqValue, freqUnit, date]);
+  }, [isEditing, mode, freqValue, freqUnit, date]);
 
   const nameOptions = useMemo(() => [...new Set(existingAssets.map((a) => a.name).filter(Boolean))], [existingAssets]);
   const symbolOptions = useMemo(() => [...new Set(existingAssets.map((a) => a.symbol).filter(Boolean))], [existingAssets]);
 
   // Pré-remplit le symbole si le nom + la catégorie correspondent à un actif déjà connu,
-  // tant que l'utilisateur n'a pas lui-même modifié le champ symbole.
+  // tant que l'utilisateur n'a pas lui-même modifié le champ symbole (désactivé en édition).
   useEffect(() => {
     if (symbolTouched) return;
     const match = existingAssets.find((a) => a.symbol && a.category === category && a.name.trim().toLowerCase() === name.trim().toLowerCase());
@@ -643,7 +644,8 @@ function TransactionForm({ existingAssets = [], onSubmitOnce, onSubmitRecurring,
 
   const handleSubmit = () => {
     const qty = isCrypto ? Number(amount) / Number(price) : Number(quantity);
-    if (mode === "ponctuel") onSubmitOnce({ id: uid(), platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), date });
+    if (isEditing) onSubmitEdit({ ...editingTx, platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), date });
+    else if (mode === "ponctuel") onSubmitOnce({ id: uid(), platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), date });
     else onSubmitRecurring({ id: uid(), kind: "transaction", active: true, platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit, lastGeneratedDate: null });
   };
   return (
@@ -695,47 +697,56 @@ function TransactionForm({ existingAssets = [], onSubmitOnce, onSubmitRecurring,
           </FieldRow>
         </div>
       )}
-      <RecurrenceToggle mode={mode} setMode={setMode} freqValue={freqValue} setFreqValue={setFreqValue} freqUnit={freqUnit} setFreqUnit={setFreqUnit} startDate={date} previewCount={previewCount} />
-      <FieldRow label={mode === "ponctuel" ? "Date" : "Premier achat le"}>
+      {!isEditing && <RecurrenceToggle mode={mode} setMode={setMode} freqValue={freqValue} setFreqValue={setFreqValue} freqUnit={freqUnit} setFreqUnit={setFreqUnit} startDate={date} previewCount={previewCount} />}
+      <FieldRow label={isEditing || mode === "ponctuel" ? "Date" : "Premier achat le"}>
         <input type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} />
       </FieldRow>
       {isCrypto
         ? (amount && price && Number(price) > 0 && <div className="bt-form-preview">Quantité obtenue : <strong>≈ {computedQty.toFixed(8).replace(/0+$/, "").replace(/\.$/, "")}</strong> unité(s)</div>)
-        : (quantity && price && <div className="bt-form-preview">Montant investi {mode === "periodique" ? "(par occurrence)" : ""} : <strong>{eur(Number(quantity) * Number(price))}</strong></div>)
+        : (quantity && price && <div className="bt-form-preview">Montant investi {!isEditing && mode === "periodique" ? "(par occurrence)" : ""} : <strong>{eur(Number(quantity) * Number(price))}</strong></div>)
       }
       <div className="bt-modal-actions">
         <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
-        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>{mode === "ponctuel" ? "Ajouter l'achat" : "Créer l'achat périodique"}</button>
+        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>
+          {isEditing ? "Enregistrer les modifications" : (mode === "ponctuel" ? "Ajouter l'achat" : "Créer l'achat périodique")}
+        </button>
       </div>
     </div>
   );
 }
 
-function SellForm({ position, onSubmit, onCancel }) {
+function SellForm({ position, editingSale = null, onSubmit, onSubmitEdit, onCancel }) {
+  const isEditing = !!editingSale;
   const isCrypto = position.category === "Crypto";
-  const [quantity, setQuantity] = useState(String(position.qty));
-  const [amount, setAmount] = useState("");
-  const [salePrice, setSalePrice] = useState("");
-  const [date, setDate] = useState(todayStr());
+  const availableQty = isEditing ? position.qty + editingSale.quantity : position.qty;
+  const [quantity, setQuantity] = useState(isEditing && !isCrypto ? String(editingSale.quantity) : String(availableQty));
+  const [amount, setAmount] = useState(isEditing && isCrypto ? String(editingSale.quantity * editingSale.salePrice) : "");
+  const [salePrice, setSalePrice] = useState(isEditing ? String(editingSale.salePrice) : "");
+  const [date, setDate] = useState(editingSale?.date || todayStr());
 
-  const maxAmount = isCrypto && Number(salePrice) > 0 ? position.qty * Number(salePrice) : null;
+  const maxAmount = isCrypto && Number(salePrice) > 0 ? availableQty * Number(salePrice) : null;
   const qtyNum = isCrypto
     ? (Number(salePrice) > 0 && Number(amount) > 0 ? Number(amount) / Number(salePrice) : 0)
     : Number(quantity);
 
-  const valid = qtyNum > 0 && qtyNum <= position.qty + 1e-9 && Number(salePrice) > 0 && (!isCrypto || Number(amount) > 0);
+  const valid = qtyNum > 0 && qtyNum <= availableQty + 1e-9 && Number(salePrice) > 0 && (!isCrypto || Number(amount) > 0);
   const proceeds = qtyNum > 0 && salePrice ? qtyNum * Number(salePrice) : 0;
   const costBasis = qtyNum > 0 ? qtyNum * position.avgPrice : 0;
   const pl = proceeds - costBasis;
 
   const sellAll = () => {
     if (isCrypto) { if (maxAmount !== null) setAmount(maxAmount.toFixed(2)); }
-    else setQuantity(String(position.qty));
+    else setQuantity(String(availableQty));
+  };
+
+  const handleSubmit = () => {
+    if (isEditing) onSubmitEdit({ ...editingSale, quantity: qtyNum, salePrice: Number(salePrice), date });
+    else onSubmit({ id: uid(), platform: position.platform, category: position.category, name: position.name, quantity: qtyNum, salePrice: Number(salePrice), date });
   };
 
   return (
     <div className="bt-form">
-      <div className="bt-form-preview">{position.name} — {formatQty(position.qty)} unité(s) disponible(s) · PRU {eur(position.avgPrice)}</div>
+      <div className="bt-form-preview">{position.name} — {formatQty(availableQty)} unité(s) disponible(s) · PRU {eur(position.avgPrice)}</div>
       {isCrypto ? (
         <>
           <FieldRow label="Prix de vente (€)">
@@ -748,15 +759,15 @@ function SellForm({ position, onSubmit, onCancel }) {
             <button className="bt-link-btn" onClick={sellAll}>Vendre la totalité (max {eur(maxAmount)})</button>
           )}
           {Number(amount) > (maxAmount ?? Infinity) + 1e-9 && (
-            <div className="bt-form-warning">Tu ne possèdes que {formatQty(position.qty)} unité(s) — à ce prix, le montant maximum vendable est {eur(maxAmount)}.</div>
+            <div className="bt-form-warning">Tu ne possèdes que {formatQty(availableQty)} unité(s) — à ce prix, le montant maximum vendable est {eur(maxAmount)}.</div>
           )}
         </>
       ) : (
         <>
           <FieldRow label="Quantité à vendre">
-            <input type="number" min="0" max={position.qty} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+            <input type="number" min="0" max={availableQty} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </FieldRow>
-          <button className="bt-link-btn" onClick={sellAll}>Vendre la totalité ({formatQty(position.qty)})</button>
+          <button className="bt-link-btn" onClick={sellAll}>Vendre la totalité ({formatQty(availableQty)})</button>
           <FieldRow label="Prix de vente unitaire (€)">
             <input type="number" min="0" step="any" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="0.00" />
           </FieldRow>
@@ -774,26 +785,28 @@ function SellForm({ position, onSubmit, onCancel }) {
       )}
       <div className="bt-modal-actions">
         <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
-        <button className="bt-btn-primary" disabled={!valid} onClick={() => onSubmit({ id: uid(), platform: position.platform, category: position.category, name: position.name, quantity: qtyNum, salePrice: Number(salePrice), date })}>Enregistrer la vente</button>
+        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>{isEditing ? "Enregistrer les modifications" : "Enregistrer la vente"}</button>
       </div>
     </div>
   );
 }
 
-function DepositForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
-  const [platform, setPlatform] = useState("traderepublic");
+function DepositForm({ editingDeposit = null, onSubmitOnce, onSubmitEdit, onSubmitRecurring, onCancel }) {
+  const isEditing = !!editingDeposit;
+  const [platform, setPlatform] = useState(editingDeposit?.platform || "traderepublic");
   const [mode, setMode] = useState("ponctuel");
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(todayStr());
+  const [amount, setAmount] = useState(editingDeposit ? String(editingDeposit.amount) : "");
+  const [date, setDate] = useState(editingDeposit?.date || todayStr());
   const [freqValue, setFreqValue] = useState("1");
   const [freqUnit, setFreqUnit] = useState("mois");
-  const valid = Number(amount) > 0 && (mode === "ponctuel" || Number(freqValue) > 0);
+  const valid = Number(amount) > 0 && (isEditing || mode === "ponctuel" || Number(freqValue) > 0);
   const previewCount = useMemo(() => {
-    if (mode !== "periodique" || !Number(freqValue)) return 0;
+    if (isEditing || mode !== "periodique" || !Number(freqValue)) return 0;
     return computeDueDates({ lastGeneratedDate: null, startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit }, todayStr()).length;
-  }, [mode, freqValue, freqUnit, date]);
+  }, [isEditing, mode, freqValue, freqUnit, date]);
   const handleSubmit = () => {
-    if (mode === "ponctuel") onSubmitOnce({ id: uid(), platform, amount: Number(amount), date });
+    if (isEditing) onSubmitEdit({ ...editingDeposit, platform, amount: Number(amount), date });
+    else if (mode === "ponctuel") onSubmitOnce({ id: uid(), platform, amount: Number(amount), date });
     else onSubmitRecurring({ id: uid(), kind: "deposit", active: true, platform, amount: Number(amount), startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit, lastGeneratedDate: null });
   };
   return (
@@ -806,13 +819,15 @@ function DepositForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
       <FieldRow label="Montant versé (€)">
         <input type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
       </FieldRow>
-      <RecurrenceToggle mode={mode} setMode={setMode} freqValue={freqValue} setFreqValue={setFreqValue} freqUnit={freqUnit} setFreqUnit={setFreqUnit} startDate={date} previewCount={previewCount} />
-      <FieldRow label={mode === "ponctuel" ? "Date" : "Premier versement le"}>
+      {!isEditing && <RecurrenceToggle mode={mode} setMode={setMode} freqValue={freqValue} setFreqValue={setFreqValue} freqUnit={freqUnit} setFreqUnit={setFreqUnit} startDate={date} previewCount={previewCount} />}
+      <FieldRow label={isEditing || mode === "ponctuel" ? "Date" : "Premier versement le"}>
         <input type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} />
       </FieldRow>
       <div className="bt-modal-actions">
         <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
-        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>{mode === "ponctuel" ? "Ajouter le versement" : "Créer le versement périodique"}</button>
+        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>
+          {isEditing ? "Enregistrer les modifications" : (mode === "ponctuel" ? "Ajouter le versement" : "Créer le versement périodique")}
+        </button>
       </div>
     </div>
   );
@@ -825,6 +840,9 @@ function PlacementsTab({ data, actions }) {
   const [showTxForm, setShowTxForm] = useState(false);
   const [showDepositForm, setShowDepositForm] = useState(false);
   const [sellPosition, setSellPosition] = useState(null);
+  const [editingTx, setEditingTx] = useState(null);
+  const [editingSale, setEditingSale] = useState(null);
+  const [editingDeposit, setEditingDeposit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [selectedKeys, setSelectedKeys] = useState(null);
   const [showLiveOverlay, setShowLiveOverlay] = useState(true);
@@ -986,9 +1004,10 @@ function PlacementsTab({ data, actions }) {
               <li key={t.id}>
                 <div className="bt-list-main">
                   <span className="bt-list-title">{t.name} <span className="bt-tag">{t.category}</span>{t.recurringId && <Repeat size={12} className="bt-recurring-mark" />}</span>
-                  <span className="bt-list-sub">{t.quantity} × {eur(t.price)} · {PLATFORMS.find((p) => p.id === t.platform)?.label} · {new Date(t.date).toLocaleDateString("fr-FR")}</span>
+                  <span className="bt-list-sub">{formatQty(t.quantity)} × {eur(t.price)} · {PLATFORMS.find((p) => p.id === t.platform)?.label} · {new Date(t.date).toLocaleDateString("fr-FR")}</span>
                 </div>
                 <div className="bt-list-amount">{eur(t.quantity * t.price)}</div>
+                <button className="bt-icon-btn" onClick={() => setEditingTx(t)}><Pencil size={16} /></button>
                 <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "tx", id: t.id })}><Trash2 size={16} /></button>
               </li>
             ))}
@@ -1007,9 +1026,10 @@ function PlacementsTab({ data, actions }) {
                 <li key={v.id}>
                   <div className="bt-list-main">
                     <span className="bt-list-title">{v.name} <span className="bt-tag">{v.category}</span></span>
-                    <span className="bt-list-sub">{v.quantity} × {eur(v.salePrice)} · {PLATFORMS.find((p) => p.id === v.platform)?.label} · {new Date(v.date).toLocaleDateString("fr-FR")}</span>
+                    <span className="bt-list-sub">{formatQty(v.quantity)} × {eur(v.salePrice)} · {PLATFORMS.find((p) => p.id === v.platform)?.label} · {new Date(v.date).toLocaleDateString("fr-FR")}</span>
                   </div>
                   <div className="bt-list-amount"><DeltaPill value={pl} size="sm" /></div>
+                  {pos && <button className="bt-icon-btn" onClick={() => { setSellPosition(pos); setEditingSale(v); }}><Pencil size={16} /></button>}
                   <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "sale", id: v.id })}><Trash2 size={16} /></button>
                 </li>
               );
@@ -1033,6 +1053,7 @@ function PlacementsTab({ data, actions }) {
                   <span className="bt-list-sub">{new Date(d.date).toLocaleDateString("fr-FR")}</span>
                 </div>
                 <div className="bt-list-amount">{eur(d.amount)}</div>
+                <button className="bt-icon-btn" onClick={() => setEditingDeposit(d)}><Pencil size={16} /></button>
                 <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "deposit", id: d.id })}><Trash2 size={16} /></button>
               </li>
             ))}
@@ -1048,6 +1069,16 @@ function PlacementsTab({ data, actions }) {
           onCancel={() => setShowTxForm(false)}
         />
       </Modal>
+      <Modal open={!!editingTx} title="Modifier l'achat" onClose={() => setEditingTx(null)}>
+        {editingTx && (
+          <TransactionForm
+            existingAssets={positions.map((p) => ({ name: p.name, category: p.category, symbol: p.symbol }))}
+            editingTx={editingTx}
+            onSubmitEdit={(tx) => { actions.updateTransaction(tx); setEditingTx(null); }}
+            onCancel={() => setEditingTx(null)}
+          />
+        )}
+      </Modal>
       <Modal open={showDepositForm} title="Ajouter un versement" onClose={() => setShowDepositForm(false)}>
         <DepositForm
           onSubmitOnce={(d) => { actions.addDeposit(d); setShowDepositForm(false); }}
@@ -1055,12 +1086,27 @@ function PlacementsTab({ data, actions }) {
           onCancel={() => setShowDepositForm(false)}
         />
       </Modal>
-      <Modal open={!!sellPosition} title={sellPosition ? `Vendre — ${sellPosition.name}` : ""} onClose={() => setSellPosition(null)}>
+      <Modal open={!!editingDeposit} title="Modifier le versement" onClose={() => setEditingDeposit(null)}>
+        {editingDeposit && (
+          <DepositForm
+            editingDeposit={editingDeposit}
+            onSubmitEdit={(d) => { actions.updateDeposit(d); setEditingDeposit(null); }}
+            onCancel={() => setEditingDeposit(null)}
+          />
+        )}
+      </Modal>
+      <Modal
+        open={!!sellPosition}
+        title={sellPosition ? `${editingSale ? "Modifier la vente" : "Vendre"} — ${sellPosition.name}` : ""}
+        onClose={() => { setSellPosition(null); setEditingSale(null); }}
+      >
         {sellPosition && (
           <SellForm
             position={sellPosition}
+            editingSale={editingSale}
             onSubmit={(sale) => { actions.addSale(sale); setSellPosition(null); }}
-            onCancel={() => setSellPosition(null)}
+            onSubmitEdit={(sale) => { actions.updateSale(sale); setSellPosition(null); setEditingSale(null); }}
+            onCancel={() => { setSellPosition(null); setEditingSale(null); }}
           />
         )}
       </Modal>
@@ -1083,20 +1129,22 @@ function PlacementsTab({ data, actions }) {
 
 /* ============================== ASSURANCE VIE ============================== */
 
-function AVForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(todayStr());
-  const [note, setNote] = useState("");
+function AVForm({ editingDeposit = null, onSubmitOnce, onSubmitEdit, onSubmitRecurring, onCancel }) {
+  const isEditing = !!editingDeposit;
+  const [amount, setAmount] = useState(editingDeposit ? String(editingDeposit.amount) : "");
+  const [date, setDate] = useState(editingDeposit?.date || todayStr());
+  const [note, setNote] = useState(editingDeposit?.note || "");
   const [mode, setMode] = useState("ponctuel");
   const [freqValue, setFreqValue] = useState("1");
   const [freqUnit, setFreqUnit] = useState("mois");
-  const valid = Number(amount) > 0 && (mode === "ponctuel" || Number(freqValue) > 0);
+  const valid = Number(amount) > 0 && (isEditing || mode === "ponctuel" || Number(freqValue) > 0);
   const previewCount = useMemo(() => {
-    if (mode !== "periodique" || !Number(freqValue)) return 0;
+    if (isEditing || mode !== "periodique" || !Number(freqValue)) return 0;
     return computeDueDates({ lastGeneratedDate: null, startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit }, todayStr()).length;
-  }, [mode, freqValue, freqUnit, date]);
+  }, [isEditing, mode, freqValue, freqUnit, date]);
   const handleSubmit = () => {
-    if (mode === "ponctuel") onSubmitOnce({ id: uid(), amount: Number(amount), date, note: note.trim() });
+    if (isEditing) onSubmitEdit({ ...editingDeposit, amount: Number(amount), date, note: note.trim() });
+    else if (mode === "ponctuel") onSubmitOnce({ id: uid(), amount: Number(amount), date, note: note.trim() });
     else onSubmitRecurring({ id: uid(), kind: "av", active: true, amount: Number(amount), note: note.trim(), startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit, lastGeneratedDate: null });
   };
   return (
@@ -1104,8 +1152,8 @@ function AVForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
       <FieldRow label="Montant versé (€)">
         <input type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
       </FieldRow>
-      <RecurrenceToggle mode={mode} setMode={setMode} freqValue={freqValue} setFreqValue={setFreqValue} freqUnit={freqUnit} setFreqUnit={setFreqUnit} startDate={date} previewCount={previewCount} />
-      <FieldRow label={mode === "ponctuel" ? "Date" : "Premier versement le"}>
+      {!isEditing && <RecurrenceToggle mode={mode} setMode={setMode} freqValue={freqValue} setFreqValue={setFreqValue} freqUnit={freqUnit} setFreqUnit={setFreqUnit} startDate={date} previewCount={previewCount} />}
+      <FieldRow label={isEditing || mode === "ponctuel" ? "Date" : "Premier versement le"}>
         <input type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} />
       </FieldRow>
       <FieldRow label="Note (optionnel)">
@@ -1113,7 +1161,9 @@ function AVForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
       </FieldRow>
       <div className="bt-modal-actions">
         <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
-        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>{mode === "ponctuel" ? "Ajouter le versement" : "Créer le versement périodique"}</button>
+        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>
+          {isEditing ? "Enregistrer les modifications" : (mode === "ponctuel" ? "Ajouter le versement" : "Créer le versement périodique")}
+        </button>
       </div>
     </div>
   );
@@ -1124,6 +1174,7 @@ function AVTab({ data, actions }) {
   const [chartPeriod, setChartPeriod] = useState("tout");
   const [chartOffset, setChartOffset] = useState(0);
   const [showForm, setShowForm] = useState(false);
+  const [editingDeposit, setEditingDeposit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const avRules = rules.filter((r) => r.kind === "av");
 
@@ -1181,6 +1232,7 @@ function AVTab({ data, actions }) {
                   <span className="bt-list-sub">{new Date(d.date).toLocaleDateString("fr-FR")}</span>
                 </div>
                 <div className="bt-list-amount">{eur(d.amount)}</div>
+                <button className="bt-icon-btn" onClick={() => setEditingDeposit(d)}><Pencil size={16} /></button>
                 <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "deposit", id: d.id })}><Trash2 size={16} /></button>
               </li>
             ))}
@@ -1194,6 +1246,15 @@ function AVTab({ data, actions }) {
           onSubmitRecurring={(rule) => { actions.addRecurringRule(rule); setShowForm(false); }}
           onCancel={() => setShowForm(false)}
         />
+      </Modal>
+      <Modal open={!!editingDeposit} title="Modifier le versement" onClose={() => setEditingDeposit(null)}>
+        {editingDeposit && (
+          <AVForm
+            editingDeposit={editingDeposit}
+            onSubmitEdit={(d) => { actions.updateAVDeposit(d); setEditingDeposit(null); }}
+            onCancel={() => setEditingDeposit(null)}
+          />
+        )}
       </Modal>
       <ConfirmDialog
         open={!!confirmDelete}
@@ -1212,23 +1273,26 @@ function AVTab({ data, actions }) {
 
 /* ============================== DEPENSES ============================== */
 
-function ExpenseForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
-  const [type, setType] = useState("variable");
-  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
-  const [customCategory, setCustomCategory] = useState("");
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(todayStr());
+function ExpenseForm({ editingExpense = null, onSubmitOnce, onSubmitEdit, onSubmitRecurring, onCancel }) {
+  const isEditing = !!editingExpense;
+  const [type, setType] = useState(editingExpense?.type || "variable");
+  const [category, setCategory] = useState(editingExpense && !EXPENSE_CATEGORIES.includes(editingExpense.category) ? "__custom__" : (editingExpense?.category || EXPENSE_CATEGORIES[0]));
+  const [customCategory, setCustomCategory] = useState(editingExpense && !EXPENSE_CATEGORIES.includes(editingExpense.category) ? editingExpense.category : "");
+  const [amount, setAmount] = useState(editingExpense ? String(editingExpense.amount) : "");
+  const [date, setDate] = useState(editingExpense?.date || todayStr());
   const [freqValue, setFreqValue] = useState("1");
   const [freqUnit, setFreqUnit] = useState("mois");
   const [endDate, setEndDate] = useState("");
   const finalCategory = category === "__custom__" ? customCategory.trim() : category;
-  const valid = Number(amount) > 0 && finalCategory && (type === "variable" || Number(freqValue) > 0);
+  const valid = Number(amount) > 0 && finalCategory && (isEditing || type === "variable" || Number(freqValue) > 0);
   const previewCount = useMemo(() => {
-    if (type !== "fixe" || !Number(freqValue)) return 0;
+    if (isEditing || type !== "fixe" || !Number(freqValue)) return 0;
     return computeDueDates({ lastGeneratedDate: null, startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit, endDate: endDate || null }, todayStr()).length;
-  }, [type, freqValue, freqUnit, date, endDate]);
+  }, [isEditing, type, freqValue, freqUnit, date, endDate]);
   const handleSubmit = () => {
-    if (type === "variable") {
+    if (isEditing) {
+      onSubmitEdit({ ...editingExpense, type, category: finalCategory, amount: Number(amount), date });
+    } else if (type === "variable") {
       onSubmitOnce({ id: uid(), type: "variable", category: finalCategory, amount: Number(amount), date });
     } else {
       onSubmitRecurring({ id: uid(), kind: "expense", active: true, category: finalCategory, amount: Number(amount), startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit, endDate: endDate || null, lastGeneratedDate: null });
@@ -1256,7 +1320,7 @@ function ExpenseForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
       <FieldRow label="Montant (€)">
         <input type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
       </FieldRow>
-      {type === "fixe" && (
+      {!isEditing && type === "fixe" && (
         <FieldRow label="Fréquence">
           <div className="bt-freq-row">
             <span>Tous les</span>
@@ -1267,22 +1331,24 @@ function ExpenseForm({ onSubmitOnce, onSubmitRecurring, onCancel }) {
           </div>
         </FieldRow>
       )}
-      <FieldRow label={type === "variable" ? "Date" : "Première échéance le"}>
-        <input type="date" value={date} max={type === "variable" ? todayStr() : undefined} onChange={(e) => setDate(e.target.value)} />
+      <FieldRow label={isEditing || type === "variable" ? "Date" : "Première échéance le"}>
+        <input type="date" value={date} max={isEditing || type === "variable" ? todayStr() : undefined} onChange={(e) => setDate(e.target.value)} />
       </FieldRow>
-      {type === "fixe" && (
+      {!isEditing && type === "fixe" && (
         <FieldRow label="Échéance de fin (optionnel)">
           <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} />
         </FieldRow>
       )}
-      {type === "fixe" && previewCount > 0 && (
+      {!isEditing && type === "fixe" && previewCount > 0 && (
         <div className="bt-form-preview bt-form-preview-recurring">
           <Repeat size={13} /> {previewCount} échéance{previewCount > 1 ? "s" : ""} depuis le {new Date(date).toLocaleDateString("fr-FR")} {previewCount > 1 ? "seront ajoutées" : "sera ajoutée"} tout de suite. {endDate ? `Ça s'arrêtera au ${new Date(endDate).toLocaleDateString("fr-FR")}.` : "Sans date de fin, ça continuera automatiquement à chaque ouverture de l'appli."}
         </div>
       )}
       <div className="bt-modal-actions">
         <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
-        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>{type === "variable" ? "Ajouter la dépense" : "Créer la dépense fixe"}</button>
+        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>
+          {isEditing ? "Enregistrer les modifications" : (type === "variable" ? "Ajouter la dépense" : "Créer la dépense fixe")}
+        </button>
       </div>
     </div>
   );
@@ -1294,6 +1360,7 @@ function DepensesTab({ data, actions }) {
   const [offset, setOffset] = useState(0);
   const [mode, setMode] = useState("eur");
   const [showForm, setShowForm] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [incomeInput, setIncomeInput] = useState(settings.monthlyIncome || "");
   const expenseRules = rules.filter((r) => r.kind === "expense");
@@ -1388,6 +1455,7 @@ function DepensesTab({ data, actions }) {
                     <span className="bt-list-sub">{new Date(e.date).toLocaleDateString("fr-FR")}</span>
                   </div>
                   <div className="bt-list-amount">{eur(e.amount)}</div>
+                  <button className="bt-icon-btn" onClick={() => setEditingExpense(e)}><Pencil size={16} /></button>
                   <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "expense", id: e.id })}><Trash2 size={16} /></button>
                 </li>
               ))}
@@ -1402,6 +1470,15 @@ function DepensesTab({ data, actions }) {
           onSubmitRecurring={(rule) => { actions.addRecurringRule(rule); setShowForm(false); }}
           onCancel={() => setShowForm(false)}
         />
+      </Modal>
+      <Modal open={!!editingExpense} title="Modifier la dépense" onClose={() => setEditingExpense(null)}>
+        {editingExpense && (
+          <ExpenseForm
+            editingExpense={editingExpense}
+            onSubmitEdit={(e) => { actions.updateExpense(e); setEditingExpense(null); }}
+            onCancel={() => setEditingExpense(null)}
+          />
+        )}
       </Modal>
       <ConfirmDialog
         open={!!confirmDelete}
@@ -1429,7 +1506,7 @@ function GraphesTab({ data }) {
   const totalVerseBinance = deposits.filter((d) => d.platform === "binance").reduce((s, d) => s + Number(d.amount), 0);
   const totalVerseAV = avDeposits.reduce((s, d) => s + Number(d.amount), 0);
 
-  const overviewData = useMemo(() => buildOverviewData("tout", { transactions, avDeposits, expenses }, "eur"), [transactions, avDeposits, expenses]);
+  const overviewData = useMemo(() => buildOverviewData("tout", 0, { transactions, avDeposits, expenses }, "eur"), [transactions, avDeposits, expenses]);
 
   const pieRepartition = [
     { name: "Trade Republic", value: totalVerseTR, color: "#24504D" },
@@ -1651,15 +1728,20 @@ export default function App() {
 
   const actions = {
     addDeposit: (d) => { setDeposits((prev) => [...prev, d]); api.insertDeposits([d]); },
+    updateDeposit: (d) => { setDeposits((prev) => prev.map((x) => x.id === d.id ? d : x)); api.updateDeposit(d); },
     deleteDeposit: (id) => { setDeposits((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("deposits", id); },
     addTransaction: (t) => { setTransactions((prev) => [...prev, t]); api.insertTransactions([t]); },
+    updateTransaction: (t) => { setTransactions((prev) => prev.map((x) => x.id === t.id ? t : x)); api.updateTransaction(t); },
     deleteTransaction: (id) => { setTransactions((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("transactions", id); },
     addSale: (v) => { setSales((prev) => [...prev, v]); api.insertSales([v]); },
+    updateSale: (v) => { setSales((prev) => prev.map((x) => x.id === v.id ? v : x)); api.updateSale(v); },
     deleteSale: (id) => { setSales((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("sales", id); },
     setTestPrice: (key, value) => { setTestPrices((prev) => ({ ...prev, [key]: value === "" ? "" : Number(value) })); api.upsertTestPrice(key, value); },
     addAVDeposit: (d) => { setAvDeposits((prev) => [...prev, d]); api.insertAVDeposits([d]); },
+    updateAVDeposit: (d) => { setAvDeposits((prev) => prev.map((x) => x.id === d.id ? d : x)); api.updateAVDeposit(d); },
     deleteAVDeposit: (id) => { setAvDeposits((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("av_deposits", id); },
     addExpense: (e) => { setExpenses((prev) => [...prev, e]); api.insertExpenses([e]); },
+    updateExpense: (e) => { setExpenses((prev) => prev.map((x) => x.id === e.id ? e : x)); api.updateExpense(e); },
     deleteExpense: (id) => { setExpenses((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("expenses", id); },
     setMonthlyIncome: (v) => { setSettings((prev) => ({ ...prev, monthlyIncome: v })); api.upsertSettings(v); },
     addRecurringRule: (rule) => {
