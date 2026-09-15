@@ -542,10 +542,10 @@ function AccueilTab({ data, actions }) {
 
 /* ============================== PLACEMENTS ============================== */
 
-function buildPositionSeries(positions, selectedKeys, period, offset, livePrices = {}) {
+function buildPositionSeries(positions, selectedKeys, period, offset) {
   const selected = positions.filter((p) => selectedKeys.has(p.key));
   const buckets = bucketsForPeriod(period, offset);
-  const rows = buckets.map((b) => {
+  return buckets.map((b) => {
     const row = { label: b.label };
     let total = 0;
     selected.forEach((p) => {
@@ -556,28 +556,6 @@ function buildPositionSeries(positions, selectedKeys, period, offset, livePrices
     row.total = total;
     return row;
   });
-
-  // Ligne en pointillés = valeur de marché actuelle, constante depuis le moment où la position
-  // a atteint sa taille actuelle jusqu'à aujourd'hui (bien visible, décalée de la ligne investie).
-  if (offset === 0 && rows.length) {
-    const last = rows.length - 1;
-    let globalStart = null;
-    selected.forEach((p) => {
-      if (!p.symbol || livePrices[p.symbol] == null) return;
-      const liveVal = Number(livePrices[p.symbol]) * p.qty;
-      const finalInvested = rows[last][p.key];
-      let startIdx = rows.findIndex((r) => Math.abs(r[p.key] - finalInvested) < 1e-9);
-      if (startIdx === -1) startIdx = last;
-      for (let i = startIdx; i <= last; i++) rows[i][`${p.key}__live`] = liveVal;
-      if (globalStart === null || startIdx < globalStart) globalStart = startIdx;
-    });
-    if (globalStart !== null) {
-      for (let i = globalStart; i <= last; i++) {
-        rows[i].total__live = selected.reduce((s, p) => s + (rows[i][`${p.key}__live`] !== undefined ? rows[i][`${p.key}__live`] : rows[i][p.key]), 0);
-      }
-    }
-  }
-  return rows;
 }
 
 function RecurrenceToggle({ mode, setMode, freqValue, setFreqValue, freqUnit, setFreqUnit, startDate, previewCount }) {
@@ -845,7 +823,6 @@ function PlacementsTab({ data, actions }) {
   const [editingDeposit, setEditingDeposit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [selectedKeys, setSelectedKeys] = useState(null);
-  const [showLiveOverlay, setShowLiveOverlay] = useState(true);
 
   const { livePrices, priceMeta, priceUpdatedAt, refreshPrices, pricesLoading } = data;
 
@@ -879,8 +856,8 @@ function PlacementsTab({ data, actions }) {
   const sortedTx = useMemo(() => [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)), [transactions]);
   const sortedSales = useMemo(() => [...sales].sort((a, b) => new Date(b.date) - new Date(a.date)), [sales]);
   const seriesData = useMemo(
-    () => selectedKeys ? buildPositionSeries(positions, selectedKeys, chartPeriod, chartOffset, showLiveOverlay ? livePrices : {}) : [],
-    [positions, selectedKeys, chartPeriod, chartOffset, showLiveOverlay, livePrices]
+    () => selectedKeys ? buildPositionSeries(positions, selectedKeys, chartPeriod, chartOffset) : [],
+    [positions, selectedKeys, chartPeriod, chartOffset]
   );
 
   const toggleKey = (key) => setSelectedKeys((prev) => {
@@ -937,9 +914,24 @@ function PlacementsTab({ data, actions }) {
                     {p.name}
                     <span className="bt-tag">{p.category}</span>
                     <span className="bt-tag bt-tag-alt">{PLATFORMS.find((pl) => pl.id === p.platform)?.label}</span>
-                    {p.symbol && p.livePrice != null && <span className="bt-tag bt-tag-live"><Repeat size={10} /> {eur(p.livePrice)}</span>}
                   </div>
                   <div className="bt-position-sub">{formatQty(p.qty)} unités · PRU {eur(p.avgPrice)} · investi {eur(p.invested)}{p.realizedPL !== 0 ? ` · déjà réalisé : ${signedEur(p.realizedPL)}` : ""}{!p.symbol && " · pas de symbole suivi"}</div>
+                </div>
+                <div className="bt-position-current">
+                  {p.symbol ? (
+                    p.livePrice != null ? (
+                      <>
+                        <div className="bt-position-current-price">{eur(p.livePrice)}</div>
+                        <div className="bt-position-current-meta">
+                          Prix actuel{priceUpdatedAt ? ` (dernière maj le ${new Date(priceUpdatedAt).toLocaleDateString("fr-FR")} à ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })})` : ""}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="bt-position-current-meta">Prix en direct indisponible</div>
+                    )
+                  ) : (
+                    <div className="bt-position-current-meta">—</div>
+                  )}
                 </div>
                 <div className="bt-position-test">
                   <label>Prix test (€)</label>
@@ -960,12 +952,6 @@ function PlacementsTab({ data, actions }) {
       <div className="bt-card">
         <div className="bt-card-head">
           <h3>Évolution des positions (montant investi cumulé)</h3>
-          {trackedOpen.length > 0 && (
-            <label className="bt-live-toggle">
-              <input type="checkbox" checked={showLiveOverlay} onChange={(e) => setShowLiveOverlay(e.target.checked)} />
-              Afficher la valeur de marché actuelle (pointillés)
-            </label>
-          )}
         </div>
         {positions.length === 0 ? <EmptyState text="Ajoute des achats pour voir le graphique." /> : (
           <>
@@ -978,15 +964,9 @@ function PlacementsTab({ data, actions }) {
                 <Tooltip formatter={(v) => eur(v)} contentStyle={{ background: "var(--bt-surface)", border: "1px solid var(--bt-border)", borderRadius: 10, fontSize: 12 }} />
                 {positions.filter((p) => selectedKeys && selectedKeys.has(p.key)).map((p, i) => {
                   const color = POSITION_COLORS[positions.findIndex(pp => pp.key === p.key) % POSITION_COLORS.length];
-                  return (
-                    <React.Fragment key={p.key}>
-                      <Line dataKey={p.key} name={p.name} stroke={color} strokeWidth={2} dot={false} type="monotone" />
-                      {showLiveOverlay && <Line dataKey={`${p.key}__live`} legendType="none" stroke={color} strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls type="monotone" />}
-                    </React.Fragment>
-                  );
+                  return <Line key={p.key} dataKey={p.key} name={p.name} stroke={color} strokeWidth={2} dot={false} type="monotone" />;
                 })}
                 <Line dataKey="total" name="Total" stroke="var(--bt-ink)" strokeWidth={2} strokeDasharray="5 3" dot={false} type="monotone" />
-                {showLiveOverlay && <Line dataKey="total__live" legendType="none" stroke="var(--bt-ink)" strokeWidth={2} strokeDasharray="1 4" dot={false} connectNulls type="monotone" />}
               </LineChart>
             </ResponsiveContainer>
           </>
@@ -1933,8 +1913,9 @@ export default function App() {
         .bt-price-note-warn { background: var(--bt-red-soft); color: var(--bt-red); }
         .bt-tag-live { background: var(--bt-green-soft); color: var(--bt-green); display: inline-flex; align-items: center; gap: 3px; }
         .bt-valuation-source { font-size: 10px; color: var(--bt-ink-soft); text-transform: uppercase; letter-spacing: 0.02em; }
-        .bt-live-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--bt-ink-soft); font-weight: 500; cursor: pointer; }
-        .bt-live-toggle input { width: 15px; height: 15px; accent-color: var(--bt-teal); }
+        .bt-position-current { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px; min-width: 150px; background: var(--bt-teal-soft); border-radius: 10px; padding: 8px 12px; }
+        .bt-position-current-price { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 15px; color: var(--bt-teal); }
+        .bt-position-current-meta { font-size: 10.5px; color: var(--bt-ink-soft); line-height: 1.3; }
 
         .bt-carousel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
         .bt-carousel-arrow { background: var(--bt-surface-alt); border-radius: 50%; width: 36px; height: 36px; }
