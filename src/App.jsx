@@ -1637,6 +1637,42 @@ function GraphesTab({ data }) {
 
 /* ============================== APP ============================== */
 
+function LoginForm({ onSuccess }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!email || !password) return;
+    setLoading(true);
+    setError("");
+    const { session, error: err } = await api.signIn(email.trim(), password);
+    setLoading(false);
+    if (err) setError("Identifiants incorrects.");
+    else onSuccess(session);
+  };
+
+  return (
+    <div className="bt-login-wrap">
+      <div className="bt-login-card">
+        <div className="bt-login-brand"><Landmark size={22} /> Suivi budget</div>
+        <p className="bt-login-sub">Connexion requise pour accéder à tes données.</p>
+        <FieldRow label="Email">
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSubmit()} autoFocus />
+        </FieldRow>
+        <FieldRow label="Mot de passe">
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSubmit()} />
+        </FieldRow>
+        {error && <div className="bt-form-warning">{error}</div>}
+        <button className="bt-btn-primary bt-login-btn" disabled={loading || !email || !password} onClick={handleSubmit}>
+          {loading ? "Connexion…" : "Se connecter"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("accueil");
@@ -1652,6 +1688,13 @@ export default function App() {
   const [priceMeta, setPriceMeta] = useState(null);
   const [priceUpdatedAt, setPriceUpdatedAt] = useState(null);
   const [pricesLoading, setPricesLoading] = useState(false);
+  const [session, setSession] = useState(undefined); // undefined = vérification en cours, null = déconnecté
+
+  useEffect(() => {
+    api.getSession().then(setSession);
+    const subscription = api.onAuthStateChange((s) => setSession(s));
+    return () => subscription.unsubscribe();
+  }, []);
 
   const refreshPrices = async (openPositions) => {
     const list = (openPositions || computePositions(transactions, sales, testPrices).filter((p) => p.qty > 1e-9 && p.symbol));
@@ -1665,6 +1708,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!session) return;
     (async () => {
       const { deposits: loadedDeposits, transactions: loadedTx, sales: loadedSales, testPrices: loadedTestPrices, avDeposits: loadedAV, expenses: loadedExpenses, settings: loadedSettings, rules: loadedRules } = await api.fetchAll();
       setSales(loadedSales);
@@ -1704,7 +1748,7 @@ export default function App() {
         setPricesLoading(false);
       }
     })();
-  }, []);
+  }, [session]);
 
   const actions = {
     addDeposit: (d) => { setDeposits((prev) => [...prev, d]); api.insertDeposits([d]); },
@@ -1814,6 +1858,8 @@ export default function App() {
 
         .bt-main { flex: 1; min-width: 0; padding: 28px 32px 100px; max-width: 1180px; }
         .bt-page-title { font-family: 'Fraunces', serif; font-size: 26px; font-weight: 600; margin: 0 0 20px; }
+        .bt-page-head { display: flex; align-items: center; justify-content: space-between; }
+        .bt-logout-mobile { display: none; align-items: center; gap: 5px; background: var(--bt-surface-alt); color: var(--bt-red); border: none; padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 20px; height: fit-content; }
 
         .bt-tab { display: flex; flex-direction: column; gap: 20px; }
 
@@ -1961,10 +2007,18 @@ export default function App() {
 
         .bt-bottomnav { display: none; }
         .bt-loading { display: flex; align-items: center; justify-content: center; height: 100vh; width: 100%; gap: 10px; color: var(--bt-ink-soft); font-size: 14px; }
+        .bt-login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; width: 100%; padding: 20px; }
+        .bt-login-card { background: var(--bt-surface); border: 1px solid var(--bt-border); border-radius: 18px; padding: 32px 28px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 14px; }
+        .bt-login-brand { font-family: 'Fraunces', serif; font-weight: 600; font-size: 21px; display: flex; align-items: center; gap: 8px; color: var(--bt-teal); }
+        .bt-login-sub { font-size: 13px; color: var(--bt-ink-soft); margin: -6px 0 4px; }
+        .bt-login-btn { width: 100%; justify-content: center; margin-top: 4px; }
+        .bt-nav-logout { margin-top: auto; color: var(--bt-red); }
+        .bt-nav-logout:hover { background: var(--bt-red-soft); }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
         @media (max-width: 768px) {
           .bt-sidebar { display: none; }
+          .bt-logout-mobile { display: inline-flex; }
           .bt-main { padding: 20px 14px 90px; }
           .bt-bottomnav {
             display: flex;
@@ -1987,7 +2041,11 @@ export default function App() {
         }
       `}</style>
 
-      {loading ? (
+      {session === undefined ? (
+        <div className="bt-loading"><Loader2 className="bt-spin" size={20} style={{ animation: "spin 1s linear infinite" }} /> Vérification de la connexion…</div>
+      ) : !session ? (
+        <LoginForm onSuccess={setSession} />
+      ) : loading ? (
         <div className="bt-loading"><Loader2 className="bt-spin" size={20} style={{ animation: "spin 1s linear infinite" }} /> Chargement de tes données…</div>
       ) : (
         <>
@@ -2001,10 +2059,14 @@ export default function App() {
                 </button>
               );
             })}
+            <button className="bt-nav-item bt-nav-logout" onClick={() => api.signOut()}><X size={17} /> Se déconnecter</button>
           </nav>
 
           <main className="bt-main">
-            <h1 className="bt-page-title">{TABS.find((t) => t.id === tab)?.label}</h1>
+            <div className="bt-page-head">
+              <h1 className="bt-page-title">{TABS.find((t) => t.id === tab)?.label}</h1>
+              <button className="bt-logout-mobile" onClick={() => api.signOut()}><X size={14} /> Déconnexion</button>
+            </div>
             {tab === "accueil" && <AccueilTab data={data} actions={actions} />}
             {tab === "placements" && <PlacementsTab data={data} actions={actions} />}
             {tab === "av" && <AVTab data={data} actions={actions} />}
