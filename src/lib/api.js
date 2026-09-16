@@ -153,3 +153,25 @@ export async function fetchLivePrices(positions) {
     return { prices: {}, meta: {} };
   }
 }
+
+/* ============================== AUTHENTIFICATION ============================== */
+
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) return { session: null, error: error.message };
+  return { session: data.session, error: null };
+}
+
+export async function signOut() {
+  await supabase.auth.signOut();
+}
+
+export async function getSession() {
+  const { data } = await supabase.auth.getSession();
+  return data.session;
+}
+
+export function onAuthStateChange(callback) {
+  const { data } = supabase.auth.onAuthStateChange((_event, session) => callback(session));
+  return data.subscription;
+}
