@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import {
   Home, TrendingUp, Umbrella, Receipt, BarChart3, Plus, Trash2, X,
-  ChevronLeft, ChevronRight, Wallet, AlertTriangle, Landmark, Loader2, Repeat, Pencil,
+  ChevronLeft, ChevronRight, Wallet, AlertTriangle, Landmark, Loader2, Repeat, Pencil, PiggyBank,
 } from "lucide-react";
 import * as api from "./lib/api.js";
 
@@ -37,7 +37,8 @@ const PERIODS = [
 const TABS = [
   { id: "accueil", label: "Accueil", icon: Home },
   { id: "placements", label: "Placements", icon: TrendingUp },
-  { id: "av", label: "Assurance vie", icon: Umbrella },
+  { id: "av", label: "Assurance vie", short: "Ass. vie", icon: Umbrella },
+  { id: "livrets", label: "Livrets", icon: PiggyBank },
   { id: "depenses", label: "Dépenses", icon: Receipt },
   { id: "graphes", label: "Graphes", icon: BarChart3 },
 ];
@@ -390,7 +391,7 @@ function buildIncomeData(period, offset, { transactions, avDeposits, expenses, m
 }
 
 function AccueilTab({ data, actions }) {
-  const { deposits, transactions, sales, testPrices, avDeposits, expenses, settings } = data;
+  const { deposits, transactions, sales, testPrices, avDeposits, expenses, settings, savings = [] } = data;
   const [period, setPeriod] = useState("1m");
   const [offset, setOffset] = useState(0);
   const [mode, setMode] = useState("eur");
@@ -407,6 +408,7 @@ function AccueilTab({ data, actions }) {
   const totalVerseAV = useMemo(() => avDeposits.reduce((s, d) => s + Number(d.amount), 0), [avDeposits]);
   const totalInvesti = useMemo(() => transactions.reduce((s, t) => s + Number(t.quantity) * Number(t.price), 0), [transactions]);
   const patrimoineTotal = totalVerseTR + totalVerseBinance + totalVerseAV;
+  const totalLivrets = savings.reduce((s, x) => s + Number(x.balance), 0);
 
   const positions = useMemo(() => computePositions(transactions, sales, testPrices, data.livePrices).filter((p) => p.qty > 1e-9), [transactions, sales, testPrices, data.livePrices]);
   const testedPositions = positions.filter((p) => p.hasTest);
@@ -428,6 +430,7 @@ function AccueilTab({ data, actions }) {
     { name: "Trade Republic", value: totalVerseTR, color: "#24504D" },
     { name: "Binance", value: totalVerseBinance, color: "#C97A3E" },
     { name: "Assurance vie", value: totalVerseAV, color: "#2F6FB0" },
+    { name: "Livrets", value: totalLivrets, color: "#8858B0" },
   ].filter((d) => d.value > 0);
 
   const recent = useMemo(() => {
@@ -442,7 +445,7 @@ function AccueilTab({ data, actions }) {
   return (
     <div className="bt-tab">
       <div className="bt-grid-stats">
-        <StatCard label="Patrimoine investi total" value={eur(patrimoineTotal)} sub="Versements réels sur toutes plateformes" />
+        <StatCard label="Patrimoine total" value={eur(patrimoineTotal + totalLivrets)} sub={totalLivrets > 0 ? `Investi ${eur(patrimoineTotal)} · Épargne qui dort ${eur(totalLivrets)}` : "Versements réels sur toutes plateformes"} />
         <StatCard label="Plus-value globale (positions simulées)" value={pvGlobale ? signedEur(pvGlobale) : "—"} sub={nonSimule > 0 ? `${nonSimule} position(s) sans simulation` : (pvGlobalePct !== null ? signedPct(pvGlobalePct) : "")} tone={testedPositions.length ? (pvGlobale >= 0 ? "pos" : "neg") : undefined} />
         <StatCard label="Dépenses ce mois-ci" value={eur(depensesMois)} sub={`${expenses.filter(e => { const d = new Date(e.date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).length} opération(s)`} />
         <StatCard label="Épargne non touchée (ce mois)" value={signedEur(solde)} sub={
@@ -508,7 +511,7 @@ function AccueilTab({ data, actions }) {
 
       <div className="bt-two-col">
         <div className="bt-card">
-          <div className="bt-card-head"><h3>Répartition du versé</h3></div>
+          <div className="bt-card-head"><h3>Répartition du patrimoine</h3></div>
           {pieData.length === 0 ? <EmptyState text="Aucun versement enregistré pour l'instant." /> : (
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
@@ -1477,8 +1480,114 @@ function DepensesTab({ data, actions }) {
 
 /* ============================== GRAPHES LIBRES ============================== */
 
+const LIVRET_SUGGESTIONS = ["Livret A", "LDDS", "LEP", "LEL", "Livret Jeune", "PEL", "Compte sur livret"];
+
+function LivretForm({ editingSaving = null, onSubmit, onSubmitEdit, onCancel }) {
+  const isEditing = !!editingSaving;
+  const [name, setName] = useState(editingSaving?.name || "");
+  const [balance, setBalance] = useState(editingSaving ? String(editingSaving.balance) : "");
+  const valid = name.trim() && balance !== "" && Number(balance) >= 0;
+  const handleSubmit = () => {
+    const base = { name: name.trim(), balance: Number(balance), updatedAt: todayStr() };
+    if (isEditing) onSubmitEdit({ ...editingSaving, ...base });
+    else onSubmit({ id: uid(), ...base });
+  };
+  return (
+    <div className="bt-form">
+      <FieldRow label="Nom du livret">
+        <input list="bt-livret-options" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Livret A, LDDS, LEP..." />
+        <datalist id="bt-livret-options">
+          {LIVRET_SUGGESTIONS.map((n) => <option key={n} value={n} />)}
+        </datalist>
+      </FieldRow>
+      <FieldRow label="Solde actuel (€)">
+        <input type="number" min="0" step="any" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" />
+      </FieldRow>
+      <div className="bt-modal-actions">
+        <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
+        <button className="bt-btn-primary" disabled={!valid} onClick={handleSubmit}>{isEditing ? "Enregistrer les modifications" : "Ajouter le livret"}</button>
+      </div>
+    </div>
+  );
+}
+
+function LivretsTab({ data, actions }) {
+  const { savings = [], deposits, avDeposits } = data;
+  const [showForm, setShowForm] = useState(false);
+  const [editingSaving, setEditingSaving] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const total = savings.reduce((s, x) => s + Number(x.balance), 0);
+  const invested = deposits.reduce((s, d) => s + Number(d.amount), 0) + avDeposits.reduce((s, d) => s + Number(d.amount), 0);
+  const share = total + invested > 0 ? (total / (total + invested)) * 100 : 0;
+  const sorted = useMemo(() => [...savings].sort((a, b) => Number(b.balance) - Number(a.balance)), [savings]);
+  const pieData = sorted.filter((x) => Number(x.balance) > 0).map((x, i) => ({ name: x.name, value: Number(x.balance), color: POSITION_COLORS[i % POSITION_COLORS.length] }));
+
+  return (
+    <div className="bt-tab">
+      <div className="bt-grid-stats">
+        <StatCard label="Épargne qui dort" value={eur(total)} sub={`${savings.length} livret(s)`} />
+        <StatCard label="Part du patrimoine total" value={`${share.toFixed(1)}%`} sub={`Investi (plateformes + assurance vie) : ${eur(invested)}`} />
+      </div>
+
+      <div className="bt-card">
+        <div className="bt-card-head">
+          <h3>Mes livrets</h3>
+          <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowForm(true)}><Plus size={16} /> Ajouter</button>
+        </div>
+        {sorted.length === 0 ? <EmptyState text="Aucun livret pour l'instant. Ajoute ton premier livret." /> : (
+          <ul className="bt-list">
+            {sorted.map((s) => (
+              <li key={s.id}>
+                <div className="bt-list-main">
+                  <span className="bt-list-title">{s.name}</span>
+                  <span className="bt-list-sub">{s.updatedAt ? `Solde mis à jour le ${new Date(s.updatedAt).toLocaleDateString("fr-FR")}` : "Date de mise à jour inconnue"}</span>
+                </div>
+                <div className="bt-list-amount">{eur(s.balance)}</div>
+                <button className="bt-icon-btn" onClick={() => setEditingSaving(s)}><Pencil size={16} /></button>
+                <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete(s.id)}><Trash2 size={16} /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {pieData.length > 1 && (
+        <div className="bt-card">
+          <div className="bt-card-head"><h3>Répartition par livret</h3></div>
+          <ResponsiveContainer width="100%" height={240}>
+            <PieChart>
+              <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
+                {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Pie>
+              <Tooltip formatter={(v) => eur(v)} contentStyle={{ background: "var(--bt-surface)", border: "1px solid var(--bt-border)", borderRadius: 10, fontSize: 12 }} />
+              <Legend verticalAlign="bottom" height={30} wrapperStyle={{ fontSize: 12 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <Modal open={showForm} title="Ajouter un livret" onClose={() => setShowForm(false)}>
+        <LivretForm onSubmit={(s) => { actions.addSaving(s); setShowForm(false); }} onCancel={() => setShowForm(false)} />
+      </Modal>
+      <Modal open={!!editingSaving} title="Modifier le livret" onClose={() => setEditingSaving(null)}>
+        {editingSaving && (
+          <LivretForm editingSaving={editingSaving} onSubmitEdit={(s) => { actions.updateSaving(s); setEditingSaving(null); }} onCancel={() => setEditingSaving(null)} />
+        )}
+      </Modal>
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Supprimer ce livret ?"
+        message="Cette action est définitive et ne peut pas être annulée."
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => { actions.deleteSaving(confirmDelete); setConfirmDelete(null); }}
+      />
+    </div>
+  );
+}
+
 function GraphesTab({ data }) {
-  const { deposits, transactions, avDeposits, expenses } = data;
+  const { deposits, transactions, avDeposits, expenses, savings = [] } = data;
   const [index, setIndex] = useState(0);
   const [touchX, setTouchX] = useState(null);
 
@@ -1486,12 +1595,15 @@ function GraphesTab({ data }) {
   const totalVerseBinance = deposits.filter((d) => d.platform === "binance").reduce((s, d) => s + Number(d.amount), 0);
   const totalVerseAV = avDeposits.reduce((s, d) => s + Number(d.amount), 0);
 
+  const totalLivrets = savings.reduce((s, x) => s + Number(x.balance), 0);
+
   const overviewData = useMemo(() => buildOverviewData("tout", 0, { transactions, avDeposits, expenses }, "eur"), [transactions, avDeposits, expenses]);
 
   const pieRepartition = [
     { name: "Trade Republic", value: totalVerseTR, color: "#24504D" },
     { name: "Binance", value: totalVerseBinance, color: "#C97A3E" },
     { name: "Assurance vie", value: totalVerseAV, color: "#2F6FB0" },
+    { name: "Livrets", value: totalLivrets, color: "#8858B0" },
   ].filter((d) => d.value > 0);
 
   const placementsData = useMemo(() => {
@@ -1682,6 +1794,7 @@ export default function App() {
   const [testPrices, setTestPrices] = useState({});
   const [avDeposits, setAvDeposits] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [savings, setSavings] = useState([]);
   const [settings, setSettings] = useState({ monthlyIncome: 0 });
   const [rules, setRules] = useState([]);
   const [livePrices, setLivePrices] = useState({});
@@ -1710,8 +1823,9 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const { deposits: loadedDeposits, transactions: loadedTx, sales: loadedSales, testPrices: loadedTestPrices, avDeposits: loadedAV, expenses: loadedExpenses, settings: loadedSettings, rules: loadedRules } = await api.fetchAll();
+      const { deposits: loadedDeposits, transactions: loadedTx, sales: loadedSales, testPrices: loadedTestPrices, avDeposits: loadedAV, expenses: loadedExpenses, settings: loadedSettings, rules: loadedRules, savings: loadedSavings } = await api.fetchAll();
       setSales(loadedSales);
+      setSavings(loadedSavings || []);
 
       setTestPrices(loadedTestPrices);
       setSettings(loadedSettings);
@@ -1767,6 +1881,9 @@ export default function App() {
     addExpense: (e) => { setExpenses((prev) => [...prev, e]); api.insertExpenses([e]); },
     updateExpense: (e) => { setExpenses((prev) => prev.map((x) => x.id === e.id ? e : x)); api.updateExpense(e); },
     deleteExpense: (id) => { setExpenses((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("expenses", id); },
+    addSaving: (s) => { setSavings((prev) => [...prev, s]); api.insertSavings([s]); },
+    updateSaving: (s) => { setSavings((prev) => prev.map((x) => x.id === s.id ? s : x)); api.updateSaving(s); },
+    deleteSaving: (id) => { setSavings((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("savings", id); },
     setMonthlyIncome: (v) => { setSettings((prev) => ({ ...prev, monthlyIncome: v })); api.upsertSettings(v); },
     addRecurringRule: (rule) => {
       const newRulesList = [...rules, rule];
@@ -1787,7 +1904,7 @@ export default function App() {
     deleteRecurringRule: (id) => { setRules((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("recurring_rules", id); },
   };
 
-  const data = { deposits, transactions, sales, testPrices, avDeposits, expenses, settings, rules, livePrices, priceMeta, priceUpdatedAt, pricesLoading, refreshPrices };
+  const data = { deposits, transactions, sales, testPrices, avDeposits, expenses, settings, rules, savings, livePrices, priceMeta, priceUpdatedAt, pricesLoading, refreshPrices };
 
   return (
     <div className="bt-app">
@@ -2032,7 +2149,7 @@ export default function App() {
           }
           .bt-bottomnav button {
             display: flex; flex-direction: column; align-items: center; gap: 3px;
-            background: none; border: none; color: var(--bt-ink-soft); font-size: 10.5px; font-weight: 600; padding: 4px 6px;
+            background: none; border: none; color: var(--bt-ink-soft); font-size: 10.5px; font-weight: 600; padding: 4px 2px; flex: 1; min-width: 0; white-space: nowrap;
           }
           .bt-bottomnav button.active { color: var(--bt-teal); }
           .bt-form-row { grid-template-columns: 1fr; }
@@ -2070,6 +2187,7 @@ export default function App() {
             {tab === "accueil" && <AccueilTab data={data} actions={actions} />}
             {tab === "placements" && <PlacementsTab data={data} actions={actions} />}
             {tab === "av" && <AVTab data={data} actions={actions} />}
+            {tab === "livrets" && <LivretsTab data={data} actions={actions} />}
             {tab === "depenses" && <DepensesTab data={data} actions={actions} />}
             {tab === "graphes" && <GraphesTab data={data} />}
           </main>
@@ -2079,7 +2197,7 @@ export default function App() {
               const Icon = t.icon;
               return (
                 <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
-                  <Icon size={19} /> {t.label}
+                  <Icon size={19} /> {t.short || t.label}
                 </button>
               );
             })}
