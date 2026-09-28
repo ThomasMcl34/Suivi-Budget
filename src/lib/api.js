@@ -12,6 +12,9 @@ const toTransactionRow = (t) => ({ id: t.id, platform: t.platform, category: t.c
 const fromTransactionRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), price: Number(r.price), date: r.date, ...(r.symbol ? { symbol: r.symbol } : {}), ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
 
 const toSaleRow = (v) => ({ id: v.id, platform: v.platform, category: v.category, name: v.name, quantity: v.quantity, sale_price: v.salePrice, date: v.date });
+const toSavingRow = (s) => ({ id: s.id, name: s.name, balance: s.balance, updated_at: s.updatedAt || null });
+const fromSavingRow = (r) => ({ id: r.id, name: r.name, balance: Number(r.balance), updatedAt: r.updated_at || null });
+
 const fromSaleRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), salePrice: Number(r.sale_price), date: r.date });
 
 const toAVRow = (d) => ({ id: d.id, amount: d.amount, date: d.date, note: d.note || null, recurring_id: d.recurringId || null });
@@ -58,7 +61,7 @@ const fromRuleRow = (r) => ({
 /* ============================== LECTURE ============================== */
 
 export async function fetchAll() {
-  const [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes] = await Promise.all([
+  const [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes, savingsRes] = await Promise.all([
     supabase.from("deposits").select("*"),
     supabase.from("transactions").select("*"),
     supabase.from("sales").select("*"),
@@ -67,9 +70,10 @@ export async function fetchAll() {
     supabase.from("expenses").select("*"),
     supabase.from("settings").select("*").eq("id", 1).maybeSingle(),
     supabase.from("recurring_rules").select("*"),
+    supabase.from("savings").select("*"),
   ]);
 
-  [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes].forEach((res) => {
+  [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes, savingsRes].forEach((res) => {
     if (res.error) console.error("Erreur de lecture Supabase :", res.error);
   });
 
@@ -87,6 +91,7 @@ export async function fetchAll() {
     expenses: (exRes.data || []).map(fromExpenseRow),
     settings: { monthlyIncome: settingsRes.data ? Number(settingsRes.data.monthly_income) : 0 },
     rules: (rulesRes.data || []).map(fromRuleRow),
+    savings: (savingsRes.data || []).map(fromSavingRow),
   };
 }
 
@@ -118,6 +123,8 @@ export const updateExpense = (e) => updateRow("expenses", e.id, toExpenseRow(e))
 export const updateSale = (v) => updateRow("sales", v.id, toSaleRow(v));
 
 export const insertSales = (rows) => insertRows("sales", rows, toSaleRow);
+export const insertSavings = (rows) => insertRows("savings", rows, toSavingRow);
+export const updateSaving = (s) => updateRow("savings", s.id, toSavingRow(s));
 export const insertAVDeposits = (rows) => insertRows("av_deposits", rows, toAVRow);
 export const insertExpenses = (rows) => insertRows("expenses", rows, toExpenseRow);
 
