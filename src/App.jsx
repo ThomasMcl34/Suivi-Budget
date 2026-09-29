@@ -887,14 +887,11 @@ function PlacementsTab({ data, actions }) {
         <div className="bt-price-bar">
           <span>
             <Repeat size={13} />
-            {pricesLoading ? "Actualisation des prix en cours…" : priceUpdatedAt ? `Prix actualisés à ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Prix pas encore actualisés"}
+            {pricesLoading ? "Actualisation en cours…" : priceUpdatedAt ? `Prix actualisés à ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Clique pour récupérer les prix actuels"}
           </span>
           <button className="bt-btn-ghost bt-btn-sm" onClick={() => refreshPrices(trackedOpen)} disabled={pricesLoading}>Actualiser les prix</button>
-          {priceMeta && priceMeta.marketOpen === false && (
-            <span className="bt-price-note">Marchés actions/ETF fermés (soirée, nuit ou week-end) — prix figés jusqu'à la prochaine ouverture. La crypto continue d'être actualisée.</span>
-          )}
           {priceMeta && priceMeta.quotaReached && (
-            <span className="bt-price-note bt-price-note-warn">Quota d'actualisations atteint pour aujourd'hui — les prix des actions/ETF resteront fixes jusqu'à demain.</span>
+            <span className="bt-price-note bt-price-note-warn">Quota mensuel d'actualisations atteint — les prix des actions/ETF resteront fixes jusqu'au mois prochain (la crypto continue de s'actualiser).</span>
           )}
         </div>
       )}
@@ -1850,17 +1847,8 @@ export default function App() {
       });
 
       setLoading(false);
-
-      // Actualisation automatique des prix en direct, une fois les données chargées
-      const openWithSymbol = computePositions(newTx, [], loadedTestPrices).filter((p) => p.qty > 1e-9 && p.symbol);
-      if (openWithSymbol.length) {
-        setPricesLoading(true);
-        const { prices, meta } = await api.fetchLivePrices(openWithSymbol);
-        setLivePrices(prices || {});
-        setPriceMeta(meta || null);
-        setPriceUpdatedAt(meta?.updatedAt || new Date().toISOString());
-        setPricesLoading(false);
-      }
+      // Les prix ne s'actualisent plus automatiquement au chargement : uniquement
+      // sur clic du bouton "Actualiser les prix", pour laisser le contrôle du quota à l'utilisateur.
     })();
   }, [session]);
 
