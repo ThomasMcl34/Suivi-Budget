@@ -108,6 +108,12 @@ export async function deleteRow(table, id) {
   if (error) console.error(`Échec suppression ${table} :`, error);
 }
 
+export async function deleteRows(table, ids) {
+  if (!ids.length) return;
+  const { error } = await supabase.from(table).delete().in("id", ids);
+  if (error) console.error(`Échec suppression ${table} :`, error);
+}
+
 async function updateRow(table, id, row) {
   const { error } = await supabase.from(table).update(row).eq("id", id);
   if (error) console.error(`Échec mise à jour ${table} :`, error);
