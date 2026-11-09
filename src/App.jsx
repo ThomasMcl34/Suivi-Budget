@@ -13,7 +13,7 @@ import * as api from "./lib/api.js";
 
 const PLATFORMS = [
   { id: "traderepublic", label: "Trade Republic" },
-  { id: "binance", label: "Binance" },
+  { id: "binance", label: "Kraken Pro" },
 ];
 
 const FREQ_UNITS = [
@@ -429,7 +429,7 @@ function AccueilTab({ data, actions }) {
 
   const pieData = [
     { name: "Trade Republic", value: totalVerseTR, color: "#24504D" },
-    { name: "Binance", value: totalVerseBinance, color: "#C97A3E" },
+    { name: "Kraken Pro", value: totalVerseBinance, color: "#C97A3E" },
     { name: "Assurance vie", value: totalVerseAV, color: "#2F6FB0" },
     { name: "Livrets", value: totalLivrets, color: "#8858B0" },
   ].filter((d) => d.value > 0);
@@ -903,7 +903,7 @@ function PlacementsTab({ data, actions }) {
   return (
     <div className="bt-tab">
       <div className="bt-grid-stats">
-        <StatCard label="Versé depuis ma banque" value={eur(totalVerse)} sub={`TR ${eur(totalVerseTR)} · Binance ${eur(totalVerseBinance)}`} />
+        <StatCard label="Versé depuis ma banque" value={eur(totalVerse)} sub={`TR ${eur(totalVerseTR)} · Kraken Pro ${eur(totalVerseBinance)}`} />
         <StatCard label="Valeur des actifs sur les marchés" value={eur(valeurMarche)} sub={nonSimulees > 0 ? `${nonSimulees} position(s) non simulée(s), valorisée(s) au coût` : `${openPositions.length} position(s) ouverte(s)`} />
         <StatCard label="Liquidités non réinvesties" value={eur(liquidites)} sub="Versé − investi + produit des ventes" tone={liquidites < 0 ? "neg" : undefined} />
         <StatCard
@@ -1633,7 +1633,7 @@ function GraphesTab({ data }) {
 
   const pieRepartition = [
     { name: "Trade Republic", value: totalVerseTR, color: "#24504D" },
-    { name: "Binance", value: totalVerseBinance, color: "#C97A3E" },
+    { name: "Kraken Pro", value: totalVerseBinance, color: "#C97A3E" },
     { name: "Assurance vie", value: totalVerseAV, color: "#2F6FB0" },
     { name: "Livrets", value: totalLivrets, color: "#8858B0" },
   ].filter((d) => d.value > 0);
