@@ -211,13 +211,14 @@ function computePositions(transactions, sales, testPrices, livePrices = {}) {
   });
   return Array.from(map.values()).map((p) => {
     const avgPrice = p.boughtQty > 0 ? p.boughtCost / p.boughtQty : 0;
-    const qty = Math.max(0, p.boughtQty - p.soldQty);
+    const rawQty = p.boughtQty - p.soldQty;
+    const qty = rawQty <= Math.max(1e-9, p.boughtQty * 1e-6) ? 0 : rawQty; // ignore les miettes d'arrondi
     const invested = qty * avgPrice;
     const soldCostBasis = p.soldQty * avgPrice;
     const realizedPL = p.soldProceeds - soldCostBasis;
     const manualTest = testPrices[p.key];
     const hasManual = manualTest !== undefined && manualTest !== null && manualTest !== "";
-    const livePrice = p.symbol && livePrices[p.symbol] != null ? Number(livePrices[p.symbol]) : null;
+    const livePrice = p.symbol && livePrices[p.symbol.toUpperCase()] != null ? Number(livePrices[p.symbol.toUpperCase()]) : null;
     const valuationSource = hasManual ? "manuel" : (livePrice !== null ? "marché" : null);
     const effectivePrice = hasManual ? Number(manualTest) : livePrice;
     const hasTest = effectivePrice !== null && effectivePrice !== undefined;
@@ -590,7 +591,7 @@ function RecurrenceToggle({ mode, setMode, freqValue, setFreqValue, freqUnit, se
   );
 }
 
-function TransactionForm({ existingAssets = [], editingTx = null, onSubmitOnce, onSubmitEdit, onSubmitRecurring, onCancel }) {
+function TransactionForm({ existingAssets = [], livePrices = {}, editingTx = null, onSubmitOnce, onSubmitEdit, onSubmitRecurring, onCancel }) {
   const isEditing = !!editingTx;
   const [platform, setPlatform] = useState(editingTx?.platform || "traderepublic");
   const [category, setCategory] = useState(editingTx?.category || "ETF");
@@ -622,6 +623,14 @@ function TransactionForm({ existingAssets = [], editingTx = null, onSubmitOnce, 
     const match = existingAssets.find((a) => a.symbol && a.category === category && a.name.trim().toLowerCase() === name.trim().toLowerCase());
     if (match) setSymbol(match.symbol);
   }, [name, category, existingAssets, symbolTouched]);
+
+  // Prix d'achat par défaut = dernier prix actualisé du symbole (modifiable)
+  const [priceTouched, setPriceTouched] = useState(isEditing);
+  useEffect(() => {
+    if (priceTouched || !symbol) return;
+    const live = livePrices[symbol.trim().toUpperCase()];
+    if (live != null && !Number.isNaN(Number(live))) setPrice(String(live));
+  }, [symbol, livePrices, priceTouched]);
 
   const handleSubmit = () => {
     const qty = isCrypto ? Number(amount) / Number(price) : Number(quantity);
@@ -665,7 +674,7 @@ function TransactionForm({ existingAssets = [], editingTx = null, onSubmitOnce, 
             <input type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
           </FieldRow>
           <FieldRow label="Prix de la crypto (€)">
-            <input type="number" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
+            <input type="number" min="0" step="any" value={price} onChange={(e) => { setPrice(e.target.value); setPriceTouched(true); }} placeholder="0.00" />
           </FieldRow>
         </div>
       ) : (
@@ -674,7 +683,7 @@ function TransactionForm({ existingAssets = [], editingTx = null, onSubmitOnce, 
             <input type="number" min="0" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
           </FieldRow>
           <FieldRow label="Prix unitaire (€)">
-            <input type="number" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
+            <input type="number" min="0" step="any" value={price} onChange={(e) => { setPrice(e.target.value); setPriceTouched(true); }} placeholder="0.00" />
           </FieldRow>
         </div>
       )}
@@ -706,9 +715,29 @@ function SellForm({ position, editingSale = null, onSubmit, onSubmitEdit, onCanc
   const [date, setDate] = useState(editingSale?.date || todayStr());
 
   const maxAmount = isCrypto && Number(salePrice) > 0 ? availableQty * Number(salePrice) : null;
-  const qtyNum = isCrypto
-    ? (Number(salePrice) > 0 && Number(amount) > 0 ? Number(amount) / Number(salePrice) : 0)
-    : Number(quantity);
+  // "Tout vendre" : on vend exactement la quantité détenue (pas de miettes d'arrondi)
+  const isAll = isCrypto
+    ? (maxAmount !== null && Number(amount) > 0 && Number(amount) >= maxAmount - 0.005)
+    : (Number(quantity) > 0 && Number(quantity) >= availableQty - 1e-9);
+  const qtyNum = isAll
+    ? availableQty
+    : isCrypto
+      ? (Number(salePrice) > 0 && Number(amount) > 0 ? Number(amount) / Number(salePrice) : 0)
+      : Number(quantity);
+  const sliderMax = isCrypto ? (maxAmount ?? 0) : availableQty;
+  const sliderValue = isCrypto ? Number(amount) || 0 : Number(quantity) || 0;
+  const onSlide = (e) => {
+    const v = Number(e.target.value);
+    if (v >= sliderMax * 0.999) { sellAll(); return; }
+    if (isCrypto) setAmount(v.toFixed(2));
+    else setQuantity(String(Number(v.toPrecision(8))));
+  };
+  const slider = sliderMax > 0 ? (
+    <div className="bt-slider-wrap">
+      <input type="range" className="bt-slider" min="0" max={sliderMax} step={sliderMax / 1000} value={Math.min(sliderValue, sliderMax)} onChange={onSlide} />
+      <div className="bt-slider-labels"><span>0</span><span>{isAll ? "Tout (la position sera fermée)" : `${Math.round((Math.min(sliderValue, sliderMax) / sliderMax) * 100)} %`}</span><span>100 %</span></div>
+    </div>
+  ) : null;
 
   const valid = qtyNum > 0 && qtyNum <= availableQty + 1e-9 && Number(salePrice) > 0 && (!isCrypto || Number(amount) > 0);
   const proceeds = qtyNum > 0 && salePrice ? qtyNum * Number(salePrice) : 0;
@@ -716,7 +745,7 @@ function SellForm({ position, editingSale = null, onSubmit, onSubmitEdit, onCanc
   const pl = proceeds - costBasis;
 
   const sellAll = () => {
-    if (isCrypto) { if (maxAmount !== null) setAmount(maxAmount.toFixed(2)); }
+    if (isCrypto) { if (maxAmount !== null) setAmount((Math.round(maxAmount * 100) / 100).toFixed(2)); }
     else setQuantity(String(availableQty));
   };
 
@@ -736,10 +765,11 @@ function SellForm({ position, editingSale = null, onSubmit, onSubmitEdit, onCanc
           <FieldRow label="Montant à vendre (€)">
             <input type="number" min="0" max={maxAmount ?? undefined} step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
           </FieldRow>
+          {slider}
           {maxAmount !== null && (
             <button className="bt-link-btn" onClick={sellAll}>Vendre la totalité (max {eur(maxAmount)})</button>
           )}
-          {Number(amount) > (maxAmount ?? Infinity) + 1e-9 && (
+          {Number(amount) > (maxAmount ?? Infinity) + 0.005 && (
             <div className="bt-form-warning">Tu ne possèdes que {formatQty(availableQty)} unité(s) — à ce prix, le montant maximum vendable est {eur(maxAmount)}.</div>
           )}
         </>
@@ -748,6 +778,7 @@ function SellForm({ position, editingSale = null, onSubmit, onSubmitEdit, onCanc
           <FieldRow label="Quantité à vendre">
             <input type="number" min="0" max={availableQty} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </FieldRow>
+          {slider}
           <button className="bt-link-btn" onClick={sellAll}>Vendre la totalité ({formatQty(availableQty)})</button>
           <FieldRow label="Prix de vente unitaire (€)">
             <input type="number" min="0" step="any" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="0.00" />
@@ -943,6 +974,7 @@ function PlacementsTab({ data, actions }) {
                   {p.valuationSource && <span className="bt-valuation-source">{p.valuationSource}</span>}
                 </div>
                 <button className="bt-btn-ghost bt-btn-sm" onClick={() => setSellPosition(p)}>Vendre</button>
+                <button className="bt-btn-ghost bt-btn-sm" title="Supprimer la position" aria-label="Supprimer la position" onClick={() => setConfirmDelete({ type: "position", position: p })}><Trash2 size={14} /></button>
               </div>
             ))}
           </div>
@@ -1043,6 +1075,7 @@ function PlacementsTab({ data, actions }) {
 
       <Modal open={showTxForm} title="Ajouter un achat" onClose={() => setShowTxForm(false)}>
         <TransactionForm
+          livePrices={livePrices}
           existingAssets={positions.map((p) => ({ name: p.name, category: p.category, symbol: p.symbol }))}
           onSubmitOnce={(tx) => { actions.addTransaction(tx); setShowTxForm(false); }}
           onSubmitRecurring={(rule) => { actions.addRecurringRule(rule); setShowTxForm(false); }}
@@ -1052,6 +1085,7 @@ function PlacementsTab({ data, actions }) {
       <Modal open={!!editingTx} title="Modifier l'achat" onClose={() => setEditingTx(null)}>
         {editingTx && (
           <TransactionForm
+            livePrices={livePrices}
             existingAssets={positions.map((p) => ({ name: p.name, category: p.category, symbol: p.symbol }))}
             editingTx={editingTx}
             onSubmitEdit={(tx) => { actions.updateTransaction(tx); setEditingTx(null); }}
@@ -1092,11 +1126,12 @@ function PlacementsTab({ data, actions }) {
       </Modal>
       <ConfirmDialog
         open={!!confirmDelete}
-        title={confirmDelete?.type === "rule" ? "Arrêter cette récurrence ?" : confirmDelete?.type === "sale" ? "Supprimer cette vente ?" : "Supprimer cet élément ?"}
-        message={confirmDelete?.type === "rule" ? "Les versements déjà effectués restent enregistrés. Seules les prochaines échéances automatiques seront arrêtées." : confirmDelete?.type === "sale" ? "Les unités vendues redeviendront comptées comme détenues. Cette action est définitive." : "Cette action est définitive et ne peut pas être annulée."}
+        title={confirmDelete?.type === "position" ? `Supprimer la position ${confirmDelete.position.name} ?` : confirmDelete?.type === "rule" ? "Arrêter cette récurrence ?" : confirmDelete?.type === "sale" ? "Supprimer cette vente ?" : "Supprimer cet élément ?"}
+        message={confirmDelete?.type === "position" ? "Tous les achats et toutes les ventes de cette position seront effacés (historique compris). Cette action est définitive." : confirmDelete?.type === "rule" ? "Les versements déjà effectués restent enregistrés. Seules les prochaines échéances automatiques seront arrêtées." : confirmDelete?.type === "sale" ? "Les unités vendues redeviendront comptées comme détenues. Cette action est définitive." : "Cette action est définitive et ne peut pas être annulée."}
         onCancel={() => setConfirmDelete(null)}
         onConfirm={() => {
-          if (confirmDelete.type === "tx") actions.deleteTransaction(confirmDelete.id);
+          if (confirmDelete.type === "position") actions.deletePosition(confirmDelete.position);
+          else if (confirmDelete.type === "tx") actions.deleteTransaction(confirmDelete.id);
           else if (confirmDelete.type === "deposit") actions.deleteDeposit(confirmDelete.id);
           else if (confirmDelete.type === "sale") actions.deleteSale(confirmDelete.id);
           else if (confirmDelete.type === "rule") actions.deleteRecurringRule(confirmDelete.id);
@@ -1861,6 +1896,14 @@ export default function App() {
     deleteTransaction: (id) => { setTransactions((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("transactions", id); },
     addSale: (v) => { setSales((prev) => [...prev, v]); api.insertSales([v]); },
     updateSale: (v) => { setSales((prev) => prev.map((x) => x.id === v.id ? v : x)); api.updateSale(v); },
+    deletePosition: (p) => {
+      const txIds = p.txs.map((t) => t.id);
+      const saleIds = p.sells.map((v) => v.id);
+      setTransactions((prev) => prev.filter((x) => !txIds.includes(x.id)));
+      setSales((prev) => prev.filter((x) => !saleIds.includes(x.id)));
+      api.deleteRows("transactions", txIds);
+      api.deleteRows("sales", saleIds);
+    },
     deleteSale: (id) => { setSales((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("sales", id); },
     setTestPrice: (key, value) => { setTestPrices((prev) => ({ ...prev, [key]: value === "" ? "" : Number(value) })); api.upsertTestPrice(key, value); },
     addAVDeposit: (d) => { setAvDeposits((prev) => [...prev, d]); api.insertAVDeposits([d]); },
@@ -2019,6 +2062,9 @@ export default function App() {
         .bt-icon-btn { background: transparent; border: none; padding: 6px; border-radius: 8px; color: var(--bt-ink-soft); display: inline-flex; align-items: center; justify-content: center; }
         .bt-icon-btn:hover { background: var(--bt-surface-alt); }
         .bt-icon-danger:hover { background: var(--bt-red-soft); color: var(--bt-red); }
+        .bt-slider-wrap { margin: 2px 0 6px; }
+        .bt-slider { width: 100%; accent-color: var(--bt-teal); }
+        .bt-slider-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--bt-muted, #888); }
         .bt-link-btn { background: none; border: none; color: var(--bt-teal); font-size: 12px; font-weight: 600; padding: 0; text-decoration: underline; }
 
         .bt-positions { display: flex; flex-direction: column; gap: 10px; }
