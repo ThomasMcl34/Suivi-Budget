@@ -933,8 +933,15 @@ function PlacementsTab({ data, actions }) {
           <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowTxForm(true)}><Plus size={16} /> Ajouter un achat</button>
         </div>
         {openPositions.length === 0 ? <EmptyState text="Aucune position ouverte pour l'instant. Ajoute ton premier achat." /> : (
-          <div className="bt-positions">
-            {openPositions.map((p, i) => (
+          <div className="bt-positions-cols">
+            {PLATFORMS.map((pl) => {
+              const inCol = openPositions.map((p, i) => ({ p, i })).filter(({ p }) => p.platform === pl.id);
+              return (
+              <div className="bt-positions-col" key={pl.id}>
+                <div className="bt-positions-col-title">{pl.label}</div>
+                {inCol.length === 0 && <div className="bt-position-current-meta">Aucune position</div>}
+                <div className="bt-positions">
+            {inCol.map(({ p, i }) => (
               <div className="bt-position-row" key={p.key}>
                 <div className="bt-position-check">
                   <input type="checkbox" checked={selectedKeys ? selectedKeys.has(p.key) : true} onChange={() => toggleKey(p.key)} style={{ accentColor: POSITION_COLORS[i % POSITION_COLORS.length] }} />
@@ -977,6 +984,10 @@ function PlacementsTab({ data, actions }) {
                 <button className="bt-btn-ghost bt-btn-sm" title="Supprimer la position" aria-label="Supprimer la position" onClick={() => setConfirmDelete({ type: "position", position: p })}><Trash2 size={14} /></button>
               </div>
             ))}
+                </div>
+              </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -2124,6 +2135,10 @@ export default function App() {
         .bt-slider-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--bt-muted, #888); }
         .bt-link-btn { background: none; border: none; color: var(--bt-teal); font-size: 12px; font-weight: 600; padding: 0; text-decoration: underline; }
 
+        .bt-positions-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+        .bt-positions-col { min-width: 0; }
+        .bt-positions-col-title { font-weight: 700; font-size: 14px; margin-bottom: 8px; }
+        @media (max-width: 860px) { .bt-positions-cols { grid-template-columns: 1fr; } }
         .bt-positions { display: flex; flex-direction: column; gap: 10px; }
         .bt-position-row { display: flex; align-items: center; gap: 14px; padding: 12px; border: 1px solid var(--bt-border); border-radius: 12px; flex-wrap: wrap; }
         .bt-position-check input { width: 17px; height: 17px; }
