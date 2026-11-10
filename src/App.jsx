@@ -590,6 +590,104 @@ function AccueilTab({ data, actions }) {
   );
 }
 
+/* ============================== ÉCHÉANCIER (CALENDRIER) ============================== */
+
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const compactEur = (n) => {
+  const a = Math.abs(n);
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `${sign}${a >= 1000 ? (a / 1000).toFixed(1).replace(".", ",") + "k" : Math.round(a)}€`;
+};
+
+function buildCalendar(view, offset) {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const todayKey = ymd(now);
+  const dayCell = (d, label) => {
+    const start = new Date(d); start.setHours(0, 0, 0, 0);
+    const end = new Date(d); end.setHours(23, 59, 59, 999);
+    return { key: ymd(start), label, start, end, startStr: ymd(start), endStr: ymd(start), isToday: ymd(start) === todayKey };
+  };
+  const fmt = (d) => d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  if (view === "semaine") {
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7) + offset * 7);
+    const cells = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday); d.setDate(monday.getDate() + i);
+      cells.push(dayCell(d, d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" })));
+    }
+    return { title: `${fmt(cells[0].start)} → ${fmt(cells[6].start)}`, cells, cols: 7, header: false };
+  }
+  if (view === "mois") {
+    const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    const n = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    const cells = Array((first.getDay() + 6) % 7).fill(null);
+    for (let i = 1; i <= n; i++) cells.push(dayCell(new Date(first.getFullYear(), first.getMonth(), i), String(i)));
+    return { title: first.toLocaleDateString("fr-FR", { month: "long", year: "numeric" }), cells, cols: 7, header: true };
+  }
+  const y = now.getFullYear() + offset;
+  const cells = [];
+  for (let i = 0; i < 12; i++) {
+    const start = new Date(y, i, 1);
+    const end = new Date(y, i + 1, 0, 23, 59, 59, 999);
+    cells.push({ key: `${y}-${i}`, label: start.toLocaleDateString("fr-FR", { month: "long" }), start, end, startStr: ymd(start), endStr: ymd(end), isToday: y === now.getFullYear() && i === now.getMonth() });
+  }
+  return { title: String(y), cells, cols: 4, header: false };
+}
+
+// renderCell(cell) => { tone: "pos" | "neg" | "exp" | "none", magnitude, main, lines: [{ text, color }], title }
+function CalendarPlanner({ storageKey, renderCell, legend, headerExtra }) {
+  const [view, setView] = usePersistentState(storageKey + "_view", "mois");
+  const [offset, setOffset] = useState(0);
+  const cal = buildCalendar(view, offset);
+  const results = cal.cells.map((c) => (c ? renderCell(c) : null));
+  const maxMag = Math.max(0, ...results.map((r) => (r && r.magnitude) || 0));
+  const bg = (r) => {
+    if (!r || r.tone === "none") return undefined;
+    const a = 0.12 + 0.38 * (maxMag > 0 ? r.magnitude / maxMag : 0);
+    const rgb = r.tone === "pos" ? "46,158,79" : r.tone === "neg" ? "201,69,69" : "201,122,62";
+    return `rgba(${rgb},${a.toFixed(2)})`;
+  };
+  return (
+    <div className="bt-cal">
+      <div className="bt-cal-top">
+        <div className="bt-segment bt-segment-sm">
+          {[["semaine", "Semaine"], ["mois", "Mois"], ["annee", "Année"]].map(([id, label]) => (
+            <button key={id} className={`bt-segment-btn ${view === id ? "active" : ""}`} onClick={() => { setView(id); setOffset(0); }}>{label}</button>
+          ))}
+        </div>
+        {headerExtra}
+      </div>
+      <div className="bt-period-window">
+        <button className="bt-icon-btn" onClick={() => setOffset(offset - 1)} aria-label="Précédent"><ChevronLeft size={16} /></button>
+        <span style={{ textTransform: "capitalize" }}>{cal.title}</span>
+        <button className="bt-icon-btn" onClick={() => setOffset(offset + 1)} aria-label="Suivant"><ChevronRight size={16} /></button>
+        {offset !== 0 && <button className="bt-link-btn" onClick={() => setOffset(0)}>Aujourd'hui</button>}
+      </div>
+      {cal.header && (
+        <div className="bt-cal-grid bt-cal-weekdays" style={{ gridTemplateColumns: `repeat(${cal.cols}, 1fr)` }}>
+          {["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."].map((d) => <div key={d}>{d}</div>)}
+        </div>
+      )}
+      <div className={`bt-cal-grid bt-cal-${view}`} style={{ gridTemplateColumns: `repeat(${cal.cols}, 1fr)` }}>
+        {cal.cells.map((c, i) => {
+          if (!c) return <div key={`b${i}`} />;
+          const r = results[i];
+          const toneClass = r && r.tone === "pos" ? "bt-text-pos" : r && r.tone === "neg" ? "bt-text-neg" : "";
+          return (
+            <div key={c.key} className={`bt-cal-cell ${c.isToday ? "today" : ""} ${!r || r.tone === "none" ? "empty" : ""}`} style={{ background: bg(r) }} title={r?.title}>
+              <div className="bt-cal-day">{c.label}</div>
+              <div className={`bt-cal-main ${toneClass}`}>{r ? r.main : "—"}</div>
+              {r && r.lines && r.lines.map((l, j) => <div key={j} className="bt-cal-line" style={l.color ? { color: l.color } : undefined}>{l.text}</div>)}
+            </div>
+          );
+        })}
+      </div>
+      {legend && <div className="bt-cal-legend">{legend}</div>}
+    </div>
+  );
+}
+
 /* ============================== PLACEMENTS ============================== */
 
 function buildPositionSeries(positions, selectedKeys, period, offset) {
@@ -892,7 +990,8 @@ function DepositForm({ editingDeposit = null, onSubmitOnce, onSubmitEdit, onSubm
 }
 
 function PlacementsTab({ data, actions }) {
-  const { deposits, transactions, sales, testPrices, rules } = data;
+  const { deposits, transactions, sales, testPrices, rules, priceHistory = [] } = data;
+  const [calMode, setCalMode] = usePersistentState("placements_cal_mode", "realise");
   const [chartPeriod, setChartPeriod] = usePersistentState("placements_period", "tout");
   const [chartOffset, setChartOffset] = useState(0);
   const [showTxForm, setShowTxForm] = useState(false);
@@ -1031,6 +1130,55 @@ function PlacementsTab({ data, actions }) {
             })}
           </div>
         )}
+      </div>
+
+      <div className="bt-card">
+        <div className="bt-card-head">
+          <h3>Échéancier des placements</h3>
+        </div>
+        <CalendarPlanner
+          storageKey="placements_cal"
+          headerExtra={
+            <select value={calMode} onChange={(e) => setCalMode(e.target.value)}>
+              <option value="realise">Réalisé : ventes − achats</option>
+              <option value="hypo">Si je vendais tout (prix actualisés)</option>
+            </select>
+          }
+          legend={calMode === "realise"
+            ? <><span><i className="bt-cal-swatch" style={{ background: "rgba(46,158,79,0.5)" }} />Plus de ventes que d'achats</span><span><i className="bt-cal-swatch" style={{ background: "rgba(201,69,69,0.5)" }} />Plus d'achats que de ventes</span></>
+            : <><span><i className="bt-cal-swatch" style={{ background: "rgba(46,158,79,0.5)" }} />Gain latent</span><span><i className="bt-cal-swatch" style={{ background: "rgba(201,69,69,0.5)" }} />Perte latente</span><span>Seules les périodes où tu as actualisé les prix sont renseignées. * = certaines positions sans prix relevé</span></>}
+          renderCell={(c) => {
+            if (calMode === "realise") {
+              const inR = (d) => d >= c.startStr && d <= c.endStr;
+              const bought = transactions.filter((t) => inR(t.date)).reduce((sum, t) => sum + Number(t.quantity) * Number(t.price), 0);
+              const sold = sales.filter((v) => inR(v.date)).reduce((sum, v) => sum + Number(v.quantity) * Number(v.salePrice), 0);
+              if (bought === 0 && sold === 0) return { tone: "none", magnitude: 0, main: "—", lines: [] };
+              const net = sold - bought;
+              return {
+                tone: net > 0 ? "pos" : net < 0 ? "neg" : "none", magnitude: Math.abs(net), main: compactEur(net),
+                lines: [{ text: `Vendu ${eur(sold)}` }, { text: `Acheté ${eur(bought)}` }],
+                title: `Ventes ${eur(sold)} − achats ${eur(bought)} = ${signedEur(net)}`,
+              };
+            }
+            // Hypothétique : plus-value latente si tout était vendu aux derniers prix relevés jusqu'à la fin de la période
+            const refreshed = priceHistory.some((r) => { const t = new Date(r.recordedAt); return t >= c.start && t <= c.end; });
+            if (!refreshed) return { tone: "none", magnitude: 0, main: "—", lines: [] };
+            const latest = {};
+            [...priceHistory].filter((r) => new Date(r.recordedAt) <= c.end).sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt)).forEach((r) => { latest[r.symbol.toUpperCase()] = r.price; });
+            const open = computePositions(transactions.filter((t) => t.date <= c.endStr), sales.filter((v) => v.date <= c.endStr), {}, latest).filter((p) => p.qty > 1e-9);
+            if (!open.length) return { tone: "none", magnitude: 0, main: "—", lines: [] };
+            const priced = open.filter((p) => p.hasTest);
+            if (!priced.length) return { tone: "none", magnitude: 0, main: "—", lines: [] };
+            const gain = priced.reduce((sum, p) => sum + p.pv, 0);
+            const cost = priced.reduce((sum, p) => sum + p.invested, 0);
+            const partial = priced.length < open.length;
+            return {
+              tone: gain > 0 ? "pos" : gain < 0 ? "neg" : "none", magnitude: Math.abs(gain), main: compactEur(gain) + (partial ? "*" : ""),
+              lines: [{ text: signedEur(gain) }, { text: cost > 0 ? signedPct((gain / cost) * 100) : "" }],
+              title: `Si tout était vendu : ${signedEur(gain)}${partial ? " (certaines positions sans prix relevé)" : ""}`,
+            };
+          }}
+        />
       </div>
 
       <div className="bt-card">
@@ -1472,6 +1620,28 @@ function DepensesTab({ data, actions }) {
             €
           </span>
         } />
+      </div>
+
+      <div className="bt-card">
+        <div className="bt-card-head">
+          <h3>Échéancier des dépenses</h3>
+        </div>
+        <CalendarPlanner
+          storageKey="depenses_cal"
+          legend={<><span><i className="bt-cal-swatch" style={{ background: "#24504D" }} />Fixe</span><span><i className="bt-cal-swatch" style={{ background: "#C97A3E" }} />Variable</span></>}
+          renderCell={(c) => {
+            const inR = expenses.filter((e) => e.date >= c.startStr && e.date <= c.endStr);
+            const fixe = inR.filter((e) => e.type === "fixe").reduce((sum, e) => sum + Number(e.amount), 0);
+            const variable = inR.filter((e) => e.type === "variable").reduce((sum, e) => sum + Number(e.amount), 0);
+            const total = fixe + variable;
+            if (total === 0) return { tone: "none", magnitude: 0, main: "—", lines: [] };
+            return {
+              tone: "exp", magnitude: total, main: `${Math.round(total)}€`,
+              lines: [{ text: `Fixe ${eur(fixe)}`, color: "#24504D" }, { text: `Variable ${eur(variable)}`, color: "#B0562F" }],
+              title: `Fixe ${eur(fixe)} · Variable ${eur(variable)} · Total ${eur(total)}`,
+            };
+          }}
+        />
       </div>
 
       <div className="bt-card">
@@ -2157,6 +2327,26 @@ export default function App() {
         .bt-segment { display: inline-flex; background: var(--bt-surface-alt); border-radius: 10px; padding: 3px; gap: 2px; flex-wrap: wrap; margin-bottom: 14px; }
         .bt-segment-sm { margin-bottom: 0; }
         .bt-period-nav { margin-bottom: 14px; }
+        .bt-cal-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+        .bt-cal-top select { padding: 7px 10px; border: 1px solid var(--bt-border); border-radius: 8px; background: var(--bt-surface); color: var(--bt-ink); font-size: 13px; margin-bottom: 14px; }
+        .bt-cal-grid { display: grid; gap: 6px; margin-top: 10px; }
+        .bt-cal-weekdays { margin-top: 12px; margin-bottom: -4px; text-align: center; font-size: 11px; color: var(--bt-ink-soft); text-transform: uppercase; }
+        .bt-cal-cell { border: 1px solid var(--bt-border); border-radius: 10px; padding: 6px 8px; min-height: 84px; display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
+        .bt-cal-cell.empty { background: var(--bt-surface-alt); }
+        .bt-cal-cell.today { outline: 2px solid var(--bt-teal); outline-offset: -1px; }
+        .bt-cal-day { font-size: 11px; color: var(--bt-ink-soft); font-weight: 600; text-transform: capitalize; }
+        .bt-cal-main { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 14px; }
+        .bt-cal-line { font-size: 10.5px; color: var(--bt-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bt-cal-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--bt-ink-soft); }
+        .bt-cal-swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+        .bt-cal-annee .bt-cal-cell { min-height: 100px; }
+        @media (max-width: 640px) {
+          .bt-cal-grid { gap: 3px; }
+          .bt-cal-cell { padding: 4px 4px; min-height: 58px; border-radius: 7px; }
+          .bt-cal-mois .bt-cal-line, .bt-cal-semaine .bt-cal-line { display: none; }
+          .bt-cal-main { font-size: 11px; }
+          .bt-cal-semaine .bt-cal-cell { min-height: 76px; }
+        }
         .bt-period-custom { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 2px; font-size: 13px; color: var(--bt-ink-soft); }
         .bt-period-custom input { margin-left: 6px; padding: 6px 8px; border: 1px solid var(--bt-border); border-radius: 8px; background: var(--bt-surface); color: var(--bt-ink); font: inherit; }
         .bt-period-window { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
