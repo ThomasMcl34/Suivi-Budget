@@ -2072,7 +2072,7 @@ export default function App() {
         .bt-nav-item:hover { background: var(--bt-surface-alt); }
         .bt-nav-item.active { background: var(--bt-teal-soft); color: var(--bt-teal); }
 
-        .bt-main { flex: 1; min-width: 0; padding: 28px 32px 100px; max-width: 1180px; }
+        .bt-main { flex: 1; min-width: 0; padding: 28px 32px 100px; }
         .bt-page-title { font-family: 'Fraunces', serif; font-size: 26px; font-weight: 600; margin: 0 0 20px; }
         .bt-page-head { display: flex; align-items: center; justify-content: space-between; }
         .bt-logout-mobile { display: none; align-items: center; gap: 5px; background: var(--bt-surface-alt); color: var(--bt-red); border: none; padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 20px; height: fit-content; }
