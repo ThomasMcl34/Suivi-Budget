@@ -1619,7 +1619,8 @@ function LivretsTab({ data, actions }) {
 }
 
 function GraphesTab({ data }) {
-  const { deposits, transactions, avDeposits, expenses, savings = [] } = data;
+  const { deposits, transactions, avDeposits, expenses, savings = [], priceHistory = [] } = data;
+  const [phMode, setPhMode] = useState("pct");
   const [index, setIndex] = useState(0);
   const [touchX, setTouchX] = useState(null);
 
@@ -1661,6 +1662,26 @@ function GraphesTab({ data }) {
     });
   }, [expenses]);
 
+  const { phSeries, phData } = useMemo(() => {
+    const nameBySymbol = {};
+    transactions.forEach((t) => { if (t.symbol) nameBySymbol[t.symbol.toUpperCase()] = t.name; });
+    const symbols = [...new Set(priceHistory.map((r) => r.symbol))].filter((sy) => nameBySymbol[sy.toUpperCase()]);
+    const first = {};
+    priceHistory.forEach((r) => { if (first[r.symbol] === undefined) first[r.symbol] = r.price; });
+    const byTime = new Map();
+    priceHistory.forEach((r) => {
+      if (!symbols.includes(r.symbol)) return;
+      const t = new Date(r.recordedAt).getTime();
+      if (!byTime.has(t)) byTime.set(t, { t });
+      byTime.get(t)[r.symbol] = phMode === "pct" ? ((r.price - first[r.symbol]) / first[r.symbol]) * 100 : r.price;
+    });
+    return {
+      phSeries: symbols.map((sy, i) => ({ symbol: sy, name: nameBySymbol[sy.toUpperCase()], color: POSITION_COLORS[i % POSITION_COLORS.length] })),
+      phData: [...byTime.values()].sort((x, y) => x.t - y.t),
+    };
+  }, [priceHistory, transactions, phMode]);
+  const fmtT = (t) => new Date(t).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
   const graphs = [
     {
       title: "Vue d'ensemble",
@@ -1677,6 +1698,29 @@ function GraphesTab({ data }) {
             <Line dataKey="placements" name="Placements (cumulé)" stroke="#24504D" strokeWidth={2.5} dot={false} type="monotone" />
           </ComposedChart>
         </ResponsiveContainer>
+      ),
+    },
+    {
+      title: "Prix des positions — historique des actualisations",
+      empty: phData.length === 0,
+      emptyText: "Aucun relevé pour l'instant : clique sur « Actualiser les prix » dans l'onglet Placements, chaque actualisation sera mémorisée ici.",
+      render: () => (
+        <>
+          <div className="bt-toggle-row" style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button className={phMode === "pct" ? "bt-btn-primary bt-btn-sm" : "bt-btn-ghost bt-btn-sm"} onClick={() => setPhMode("pct")}>% depuis le 1er relevé</button>
+            <button className={phMode === "eur" ? "bt-btn-primary bt-btn-sm" : "bt-btn-ghost bt-btn-sm"} onClick={() => setPhMode("eur")}>Prix en €</button>
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={phData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--bt-border)" vertical={false} />
+              <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={fmtT} tick={{ fontSize: 11, fill: "var(--bt-ink-soft)" }} axisLine={{ stroke: "var(--bt-border)" }} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--bt-ink-soft)" }} axisLine={false} tickLine={false} width={54} tickFormatter={(v) => phMode === "pct" ? `${v.toFixed(1)} %` : formatAxisEur(v)} />
+              <Tooltip labelFormatter={fmtT} formatter={(v) => phMode === "pct" ? `${Number(v).toFixed(2)} %` : eur(v)} contentStyle={{ background: "var(--bt-surface)", border: "1px solid var(--bt-border)", borderRadius: 10, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              {phSeries.map((sr) => <Line key={sr.symbol} dataKey={sr.symbol} name={sr.name} stroke={sr.color} strokeWidth={2.5} dot={{ r: 3 }} connectNulls type="monotone" />)}
+            </LineChart>
+          </ResponsiveContainer>
+        </>
       ),
     },
     {
@@ -1769,7 +1813,7 @@ function GraphesTab({ data }) {
             setTouchX(null);
           }}
         >
-          {current.empty ? <EmptyState text="Pas encore assez de données pour ce graphique." /> : current.render()}
+          {current.empty ? <EmptyState text={current.emptyText || "Pas encore assez de données pour ce graphique."} /> : current.render()}
         </div>
         <div className="bt-carousel-dots">
           {graphs.map((g, i) => <button key={i} className={`bt-dot-btn ${i === index ? "active" : ""}`} onClick={() => setIndex(i)} aria-label={g.title} />)}
@@ -1830,6 +1874,7 @@ export default function App() {
   const [settings, setSettings] = useState({ monthlyIncome: 0 });
   const [rules, setRules] = useState([]);
   const [livePrices, setLivePrices] = useState({});
+  const [priceHistory, setPriceHistory] = useState([]);
   const [priceMeta, setPriceMeta] = useState(null);
   const [priceUpdatedAt, setPriceUpdatedAt] = useState(null);
   const [pricesLoading, setPricesLoading] = useState(false);
@@ -1847,6 +1892,17 @@ export default function App() {
     setPricesLoading(true);
     const { prices, meta } = await api.fetchLivePrices(list);
     setLivePrices((prev) => ({ ...prev, ...prices }));
+    // Mémorise ce relevé pour le graphe d'historique (ignore un prix identique relevé il y a moins de 10 min)
+    const nowIso = new Date().toISOString();
+    const newRows = [];
+    Object.entries(prices || {}).forEach(([symbol, price]) => {
+      const p = Number(price);
+      if (!(p > 0)) return;
+      const last = [...priceHistory].reverse().find((r) => r.symbol === symbol);
+      if (last && last.price === p && Date.now() - new Date(last.recordedAt).getTime() < 10 * 60000) return;
+      newRows.push({ id: uid(), symbol, price: p, recordedAt: nowIso });
+    });
+    if (newRows.length) { setPriceHistory((prev) => [...prev, ...newRows]); api.insertPriceHistory(newRows); }
     setPriceMeta(meta || null);
     setPriceUpdatedAt(meta?.updatedAt || new Date().toISOString());
     setPricesLoading(false);
@@ -1855,7 +1911,8 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const { deposits: loadedDeposits, transactions: loadedTx, sales: loadedSales, testPrices: loadedTestPrices, avDeposits: loadedAV, expenses: loadedExpenses, settings: loadedSettings, rules: loadedRules, savings: loadedSavings } = await api.fetchAll();
+      const { deposits: loadedDeposits, transactions: loadedTx, sales: loadedSales, testPrices: loadedTestPrices, avDeposits: loadedAV, expenses: loadedExpenses, settings: loadedSettings, rules: loadedRules, savings: loadedSavings, priceHistory: loadedPriceHistory } = await api.fetchAll();
+      setPriceHistory(loadedPriceHistory || []);
       setSales(loadedSales);
       setSavings(loadedSavings || []);
 
@@ -1935,7 +1992,7 @@ export default function App() {
     deleteRecurringRule: (id) => { setRules((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("recurring_rules", id); },
   };
 
-  const data = { deposits, transactions, sales, testPrices, avDeposits, expenses, settings, rules, savings, livePrices, priceMeta, priceUpdatedAt, pricesLoading, refreshPrices };
+  const data = { deposits, transactions, sales, testPrices, avDeposits, expenses, settings, rules, savings, priceHistory, livePrices, priceMeta, priceUpdatedAt, pricesLoading, refreshPrices };
 
   return (
     <div className="bt-app">
