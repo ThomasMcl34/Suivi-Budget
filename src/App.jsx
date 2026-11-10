@@ -28,10 +28,11 @@ const POSITION_COLORS = ["#24504D", "#C97A3E", "#2E9E4F", "#8858B0", "#2F6FB0", 
 
 const PERIODS = [
   { id: "1j", label: "1 jour" },
-  { id: "7j", label: "7 jours" },
+  { id: "7j", label: "1 semaine" },
   { id: "1m", label: "1 mois" },
   { id: "1a", label: "1 an" },
   { id: "tout", label: "Depuis le début" },
+  { id: "perso", label: "Personnalisé" },
 ];
 
 const TABS = [
@@ -48,6 +49,28 @@ const TABS = [
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// État mémorisé dans le navigateur d'une ouverture de l'appli à l'autre
+function usePersistentState(key, initial) {
+  const [value, setValue] = useState(() => {
+    try {
+      const raw = localStorage.getItem("bt:" + key);
+      if (raw !== null) return JSON.parse(raw);
+    } catch (e) { /* stockage indisponible */ }
+    return initial;
+  });
+  useEffect(() => {
+    try { localStorage.setItem("bt:" + key, JSON.stringify(value)); } catch (e) { /* ignore */ }
+  }, [key, value]);
+  return [value, setValue];
+}
+
+// Période personnalisée encodée sous la forme "perso:AAAA-MM-JJ:AAAA-MM-JJ"
+const isCustomPeriod = (p) => typeof p === "string" && p.startsWith("perso:");
+function parseCustomPeriod(p) {
+  const [, from, to] = p.split(":");
+  return { from, to };
+}
+
 const eur = (n) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 2 }).format(n || 0);
 
@@ -55,6 +78,14 @@ const signedEur = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${eur(Math.abs(n ||
 const signedPct = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n || 0).toFixed(1)}%`;
 
 function periodRange(period, offset = 0) {
+  if (isCustomPeriod(period)) {
+    const { from, to } = parseCustomPeriod(period);
+    let start = new Date(from + "T00:00:00");
+    let end = new Date(to + "T23:59:59.999");
+    if (isNaN(start) || isNaN(end)) { end = new Date(); end.setHours(23, 59, 59, 999); start = new Date(end); start.setMonth(start.getMonth() - 1); }
+    if (start > end) { const tmp = start; start = new Date(end); end = new Date(tmp); start.setHours(0, 0, 0, 0); end.setHours(23, 59, 59, 999); }
+    return { start, end };
+  }
   const end = new Date(); end.setHours(23, 59, 59, 999);
   if (period === "1j") end.setDate(end.getDate() - offset);
   else if (period === "7j") end.setDate(end.getDate() - offset * 7);
@@ -78,7 +109,7 @@ function inPeriodRange(dateStr, period, offset = 0) {
 
 function bucketsForPeriod(period, offset = 0) {
   const { start, end } = periodRange(period, offset);
-  const useMonth = period === "1a" || period === "tout";
+  const useMonth = period === "1a" || period === "tout" || (isCustomPeriod(period) && (end - start) / 86400000 > 92);
   const buckets = [];
   if (!useMonth) {
     const cursor = new Date(start); cursor.setHours(0, 0, 0, 0);
@@ -290,10 +321,17 @@ function DeltaPill({ value, mode = "eur", size = "md" }) {
 }
 
 function PeriodBar({ value, onChange }) {
+  const custom = isCustomPeriod(value);
+  const select = (id) => {
+    if (id !== "perso") { onChange(id); return; }
+    if (custom) return;
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    onChange(`perso:${d.toISOString().slice(0, 10)}:${todayStr()}`);
+  };
   return (
     <div className="bt-segment">
       {PERIODS.map((p) => (
-        <button key={p.id} className={`bt-segment-btn ${value === p.id ? "active" : ""}`} onClick={() => onChange(p.id)}>{p.label}</button>
+        <button key={p.id} className={`bt-segment-btn ${(p.id === "perso" ? custom : value === p.id) ? "active" : ""}`} onClick={() => select(p.id)}>{p.label}</button>
       ))}
     </div>
   );
@@ -302,10 +340,18 @@ function PeriodBar({ value, onChange }) {
 function PeriodNav({ period, onPeriodChange, offset, onOffsetChange }) {
   const { start, end } = periodRange(period, offset);
   const fmt = (d) => d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  const custom = isCustomPeriod(period);
+  const { from, to } = custom ? parseCustomPeriod(period) : { from: "", to: "" };
   return (
     <div className="bt-period-nav">
       <PeriodBar value={period} onChange={(p) => { onPeriodChange(p); onOffsetChange(0); }} />
-      {period !== "tout" && (
+      {custom && (
+        <div className="bt-period-custom">
+          <label>Du <input type="date" value={from} max={to || undefined} onChange={(e) => e.target.value && onPeriodChange(`perso:${e.target.value}:${to}`)} /></label>
+          <label>au <input type="date" value={to} min={from || undefined} onChange={(e) => e.target.value && onPeriodChange(`perso:${from}:${e.target.value}`)} /></label>
+        </div>
+      )}
+      {period !== "tout" && !custom && (
         <div className="bt-period-window">
           <button className="bt-icon-btn" onClick={() => onOffsetChange(offset + 1)} aria-label="Période précédente"><ChevronLeft size={16} /></button>
           <span>{fmt(start)} → {fmt(end)}</span>
@@ -393,13 +439,13 @@ function buildIncomeData(period, offset, { transactions, avDeposits, expenses, m
 
 function AccueilTab({ data, actions }) {
   const { deposits, transactions, sales, testPrices, avDeposits, expenses, settings, savings = [] } = data;
-  const [period, setPeriod] = useState("1m");
+  const [period, setPeriod] = usePersistentState("accueil_period", "1m");
   const [offset, setOffset] = useState(0);
-  const [mode, setMode] = useState("eur");
-  const [filter, setFilter] = useState("tout");
-  const [incomePeriod, setIncomePeriod] = useState("1m");
+  const [mode, setMode] = usePersistentState("accueil_mode", "eur");
+  const [filter, setFilter] = usePersistentState("accueil_filter", "tout");
+  const [incomePeriod, setIncomePeriod] = usePersistentState("accueil_income_period", "1m");
   const [incomeOffset, setIncomeOffset] = useState(0);
-  const [incomeMode, setIncomeMode] = useState("eur");
+  const [incomeMode, setIncomeMode] = usePersistentState("accueil_income_mode", "eur");
   const [incomeInput, setIncomeInput] = useState(settings.monthlyIncome || "");
 
   useEffect(() => setIncomeInput(settings.monthlyIncome || ""), [settings.monthlyIncome]);
@@ -847,7 +893,7 @@ function DepositForm({ editingDeposit = null, onSubmitOnce, onSubmitEdit, onSubm
 
 function PlacementsTab({ data, actions }) {
   const { deposits, transactions, sales, testPrices, rules } = data;
-  const [chartPeriod, setChartPeriod] = useState("tout");
+  const [chartPeriod, setChartPeriod] = usePersistentState("placements_period", "tout");
   const [chartOffset, setChartOffset] = useState(0);
   const [showTxForm, setShowTxForm] = useState(false);
   const [showDepositForm, setShowDepositForm] = useState(false);
@@ -856,7 +902,7 @@ function PlacementsTab({ data, actions }) {
   const [editingSale, setEditingSale] = useState(null);
   const [editingDeposit, setEditingDeposit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [selectedKeys, setSelectedKeys] = useState(null);
+  const [hiddenKeys, setHiddenKeys] = usePersistentState("placements_hidden", []);
 
   const { livePrices, priceMeta, priceUpdatedAt, refreshPrices, pricesLoading } = data;
 
@@ -867,9 +913,8 @@ function PlacementsTab({ data, actions }) {
   const openPositions = positions.filter((p) => p.qty > 1e-9);
   const trackedOpen = openPositions.filter((p) => p.symbol);
 
-  useEffect(() => {
-    if (selectedKeys === null && positions.length) setSelectedKeys(new Set(positions.map((p) => p.key)));
-  }, [positions, selectedKeys]);
+  // Les positions décochées sont mémorisées ; les nouvelles positions sont cochées par défaut
+  const selectedKeys = useMemo(() => new Set(positions.filter((p) => !hiddenKeys.includes(p.key)).map((p) => p.key)), [positions, hiddenKeys]);
 
   const totalVerseTR = deposits.filter((d) => d.platform === "traderepublic").reduce((s, d) => s + Number(d.amount), 0);
   const totalVerseBinance = deposits.filter((d) => d.platform === "binance").reduce((s, d) => s + Number(d.amount), 0);
@@ -894,11 +939,7 @@ function PlacementsTab({ data, actions }) {
     [positions, selectedKeys, chartPeriod, chartOffset]
   );
 
-  const toggleKey = (key) => setSelectedKeys((prev) => {
-    const next = new Set(prev);
-    next.has(key) ? next.delete(key) : next.add(key);
-    return next;
-  });
+  const toggleKey = (key) => setHiddenKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
 
   return (
     <div className="bt-tab">
@@ -1197,7 +1238,7 @@ function AVForm({ editingDeposit = null, onSubmitOnce, onSubmitEdit, onSubmitRec
 
 function AVTab({ data, actions }) {
   const { avDeposits, rules } = data;
-  const [chartPeriod, setChartPeriod] = useState("tout");
+  const [chartPeriod, setChartPeriod] = usePersistentState("av_period", "tout");
   const [chartOffset, setChartOffset] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [editingDeposit, setEditingDeposit] = useState(null);
@@ -1382,9 +1423,9 @@ function ExpenseForm({ editingExpense = null, onSubmitOnce, onSubmitEdit, onSubm
 
 function DepensesTab({ data, actions }) {
   const { expenses, settings, rules } = data;
-  const [period, setPeriod] = useState("1m");
+  const [period, setPeriod] = usePersistentState("depenses_period", "1m");
   const [offset, setOffset] = useState(0);
-  const [mode, setMode] = useState("eur");
+  const [mode, setMode] = usePersistentState("depenses_mode", "eur");
   const [showForm, setShowForm] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -1631,17 +1672,23 @@ function LivretsTab({ data, actions }) {
 
 function GraphesTab({ data }) {
   const { deposits, transactions, avDeposits, expenses, savings = [], priceHistory = [] } = data;
-  const [phMode, setPhMode] = useState("pct");
-  const [index, setIndex] = useState(0);
+  const [phMode, setPhMode] = usePersistentState("graphes_prix_mode", "pct");
+  const [index, setIndex] = usePersistentState("graphes_index", 0);
+  // Période propre à chaque graphe, mémorisée (le décalage « précédent / suivant » repart à 0)
+  const [gPeriods, setGPeriods] = usePersistentState("graphes_periods", {});
+  const [gOffsets, setGOffsets] = useState({});
+  const gp = (id) => gPeriods[id] || "tout";
+  const goff = (id) => gOffsets[id] || 0;
   const [touchX, setTouchX] = useState(null);
 
-  const totalVerseTR = deposits.filter((d) => d.platform === "traderepublic").reduce((s, d) => s + Number(d.amount), 0);
-  const totalVerseBinance = deposits.filter((d) => d.platform === "binance").reduce((s, d) => s + Number(d.amount), 0);
-  const totalVerseAV = avDeposits.reduce((s, d) => s + Number(d.amount), 0);
+  const inP = (id) => (d) => inPeriodRange(d.date, gp(id), goff(id));
+  const totalVerseTR = deposits.filter(inP("pie")).filter((d) => d.platform === "traderepublic").reduce((s, d) => s + Number(d.amount), 0);
+  const totalVerseBinance = deposits.filter(inP("pie")).filter((d) => d.platform === "binance").reduce((s, d) => s + Number(d.amount), 0);
+  const totalVerseAV = avDeposits.filter(inP("pie")).reduce((s, d) => s + Number(d.amount), 0);
 
   const totalLivrets = savings.reduce((s, x) => s + Number(x.balance), 0);
 
-  const overviewData = useMemo(() => buildOverviewData("tout", 0, { transactions, avDeposits, expenses }, "eur"), [transactions, avDeposits, expenses]);
+  const overviewData = useMemo(() => buildOverviewData(gp("overview"), goff("overview"), { transactions, avDeposits, expenses }, "eur"), [gPeriods, gOffsets, transactions, avDeposits, expenses]);
 
   const pieRepartition = [
     { name: "Trade Republic", value: totalVerseTR, color: "#24504D" },
@@ -1651,36 +1698,38 @@ function GraphesTab({ data }) {
   ].filter((d) => d.value > 0);
 
   const placementsData = useMemo(() => {
-    const buckets = bucketsForPeriod("tout");
+    const buckets = bucketsForPeriod(gp("placements"), goff("placements"));
     const events = transactions.map((t) => ({ date: t.date, amount: Number(t.quantity) * Number(t.price) }));
     return buckets.map((b) => ({ label: b.label, investi: events.filter((e) => new Date(e.date) <= b.end).reduce((s, e) => s + e.amount, 0) }));
-  }, [transactions]);
+  }, [transactions, gPeriods, gOffsets]);
 
   const avData = useMemo(() => {
-    const buckets = bucketsForPeriod("tout");
+    const buckets = bucketsForPeriod(gp("av"), goff("av"));
     return buckets.map((b) => {
       const cum = avDeposits.filter((d) => new Date(d.date) <= b.end).reduce((s, d) => s + Number(d.amount), 0);
       const mensuel = avDeposits.filter((d) => { const dt = new Date(d.date); return dt >= b.start && dt <= b.end; }).reduce((s, d) => s + Number(d.amount), 0);
       return { label: b.label, cumule: cum, mensuel };
     });
-  }, [avDeposits]);
+  }, [avDeposits, gPeriods, gOffsets]);
 
   const depensesData = useMemo(() => {
-    const buckets = bucketsForPeriod("tout");
+    const buckets = bucketsForPeriod(gp("depenses"), goff("depenses"));
     return buckets.map((b) => {
       const inB = expenses.filter((e) => { const d = new Date(e.date); return d >= b.start && d <= b.end; });
       return { label: b.label, fixe: inB.filter((e) => e.type === "fixe").reduce((s, e) => s + Number(e.amount), 0), variable: inB.filter((e) => e.type === "variable").reduce((s, e) => s + Number(e.amount), 0) };
     });
-  }, [expenses]);
+  }, [expenses, gPeriods, gOffsets]);
 
   const { phSeries, phData } = useMemo(() => {
+    const { start: phStart, end: phEnd } = periodRange(gp("prix"), goff("prix"));
+    const history = priceHistory.filter((r) => { const t = new Date(r.recordedAt); return t >= phStart && t <= phEnd; });
     const nameBySymbol = {};
     transactions.forEach((t) => { if (t.symbol) nameBySymbol[t.symbol.toUpperCase()] = t.name; });
-    const symbols = [...new Set(priceHistory.map((r) => r.symbol))].filter((sy) => nameBySymbol[sy.toUpperCase()]);
+    const symbols = [...new Set(history.map((r) => r.symbol))].filter((sy) => nameBySymbol[sy.toUpperCase()]);
     const first = {};
-    priceHistory.forEach((r) => { if (first[r.symbol] === undefined) first[r.symbol] = r.price; });
+    history.forEach((r) => { if (first[r.symbol] === undefined) first[r.symbol] = r.price; });
     const byTime = new Map();
-    priceHistory.forEach((r) => {
+    history.forEach((r) => {
       if (!symbols.includes(r.symbol)) return;
       const t = new Date(r.recordedAt).getTime();
       if (!byTime.has(t)) byTime.set(t, { t });
@@ -1690,11 +1739,12 @@ function GraphesTab({ data }) {
       phSeries: symbols.map((sy, i) => ({ symbol: sy, name: nameBySymbol[sy.toUpperCase()], color: POSITION_COLORS[i % POSITION_COLORS.length] })),
       phData: [...byTime.values()].sort((x, y) => x.t - y.t),
     };
-  }, [priceHistory, transactions, phMode]);
+  }, [priceHistory, transactions, phMode, gPeriods, gOffsets]);
   const fmtT = (t) => new Date(t).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
   const graphs = [
     {
+      id: "overview",
       title: "Vue d'ensemble",
       empty: transactions.length === 0 && avDeposits.length === 0 && expenses.length === 0,
       render: () => (
@@ -1712,9 +1762,10 @@ function GraphesTab({ data }) {
       ),
     },
     {
+      id: "prix",
       title: "Prix des positions — historique des actualisations",
-      empty: phData.length === 0,
-      emptyText: "Aucun relevé pour l'instant : clique sur « Actualiser les prix » dans l'onglet Placements, chaque actualisation sera mémorisée ici.",
+      empty: priceHistory.length === 0 || phData.length === 0,
+      emptyText: "Aucun relevé sur cette période. Clique sur « Actualiser les prix » dans l'onglet Placements : chaque actualisation est mémorisée ici.",
       render: () => (
         <>
           <div className="bt-toggle-row" style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -1735,6 +1786,7 @@ function GraphesTab({ data }) {
       ),
     },
     {
+      id: "pie",
       title: "Répartition du patrimoine",
       empty: pieRepartition.length === 0,
       render: () => (
@@ -1750,6 +1802,7 @@ function GraphesTab({ data }) {
       ),
     },
     {
+      id: "placements",
       title: "Placements — évolution",
       empty: transactions.length === 0,
       render: () => (
@@ -1765,6 +1818,7 @@ function GraphesTab({ data }) {
       ),
     },
     {
+      id: "av",
       title: "Assurance vie — versements",
       empty: avDeposits.length === 0,
       render: () => (
@@ -1782,6 +1836,7 @@ function GraphesTab({ data }) {
       ),
     },
     {
+      id: "depenses",
       title: "Dépenses — fixe vs extra",
       empty: expenses.length === 0,
       render: () => (
@@ -1800,7 +1855,7 @@ function GraphesTab({ data }) {
     },
   ];
 
-  const current = graphs[index];
+  const current = graphs[Math.min(Math.max(0, Number(index) || 0), graphs.length - 1)];
   const go = (dir) => setIndex((i) => (i + dir + graphs.length) % graphs.length);
 
   return (
@@ -1809,11 +1864,17 @@ function GraphesTab({ data }) {
         <div className="bt-carousel-head">
           <button className="bt-icon-btn bt-carousel-arrow" onClick={() => go(-1)}><ChevronLeft size={20} /></button>
           <div className="bt-carousel-title">
-            <span className="bt-carousel-index">{index + 1}/{graphs.length}</span>
+            <span className="bt-carousel-index">{graphs.indexOf(current) + 1}/{graphs.length}</span>
             <h3>{current.title}</h3>
           </div>
           <button className="bt-icon-btn bt-carousel-arrow" onClick={() => go(1)}><ChevronRight size={20} /></button>
         </div>
+        <PeriodNav
+          period={gp(current.id)}
+          onPeriodChange={(p) => setGPeriods((prev) => ({ ...prev, [current.id]: p }))}
+          offset={goff(current.id)}
+          onOffsetChange={(o) => setGOffsets((prev) => ({ ...prev, [current.id]: o }))}
+        />
         <div
           className="bt-chart-wrap"
           onTouchStart={(e) => setTouchX(e.touches[0].clientX)}
@@ -2096,6 +2157,8 @@ export default function App() {
         .bt-segment { display: inline-flex; background: var(--bt-surface-alt); border-radius: 10px; padding: 3px; gap: 2px; flex-wrap: wrap; margin-bottom: 14px; }
         .bt-segment-sm { margin-bottom: 0; }
         .bt-period-nav { margin-bottom: 14px; }
+        .bt-period-custom { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 2px; font-size: 13px; color: var(--bt-ink-soft); }
+        .bt-period-custom input { margin-left: 6px; padding: 6px 8px; border: 1px solid var(--bt-border); border-radius: 8px; background: var(--bt-surface); color: var(--bt-ink); font: inherit; }
         .bt-period-window { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
         .bt-period-window span { font-family: 'Space Mono', monospace; font-size: 12.5px; color: var(--bt-ink-soft); font-weight: 600; }
         .bt-period-window .bt-icon-btn { background: var(--bt-surface-alt); border-radius: 8px; width: 30px; height: 30px; }
