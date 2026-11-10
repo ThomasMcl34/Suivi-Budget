@@ -61,7 +61,7 @@ const fromRuleRow = (r) => ({
 /* ============================== LECTURE ============================== */
 
 export async function fetchAll() {
-  const [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes, savingsRes] = await Promise.all([
+  const [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes, savingsRes, phRes] = await Promise.all([
     supabase.from("deposits").select("*"),
     supabase.from("transactions").select("*"),
     supabase.from("sales").select("*"),
@@ -71,6 +71,7 @@ export async function fetchAll() {
     supabase.from("settings").select("*").eq("id", 1).maybeSingle(),
     supabase.from("recurring_rules").select("*"),
     supabase.from("savings").select("*"),
+    supabase.from("price_history").select("*").order("recorded_at", { ascending: true }),
   ]);
 
   [depositsRes, txRes, salesRes, tpRes, avRes, exRes, settingsRes, rulesRes, savingsRes].forEach((res) => {
@@ -92,6 +93,7 @@ export async function fetchAll() {
     settings: { monthlyIncome: settingsRes.data ? Number(settingsRes.data.monthly_income) : 0 },
     rules: (rulesRes.data || []).map(fromRuleRow),
     savings: (savingsRes.data || []).map(fromSavingRow),
+    priceHistory: (phRes.data || []).map((r) => ({ id: r.id, symbol: r.symbol, price: Number(r.price), recordedAt: r.recorded_at })),
   };
 }
 
@@ -127,6 +129,12 @@ export const updateDeposit = (d) => updateRow("deposits", d.id, toDepositRow(d))
 export const updateAVDeposit = (d) => updateRow("av_deposits", d.id, toAVRow(d));
 export const updateExpense = (e) => updateRow("expenses", e.id, toExpenseRow(e));
 export const updateSale = (v) => updateRow("sales", v.id, toSaleRow(v));
+
+export async function insertPriceHistory(rows) {
+  if (!rows.length) return;
+  const { error } = await supabase.from("price_history").insert(rows.map((r) => ({ id: r.id, symbol: r.symbol, price: r.price, recorded_at: r.recordedAt })));
+  if (error) console.error("Échec enregistrement historique des prix :", error);
+}
 
 export const insertSales = (rows) => insertRows("sales", rows, toSaleRow);
 export const insertSavings = (rows) => insertRows("savings", rows, toSavingRow);
