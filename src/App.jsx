@@ -1663,13 +1663,18 @@ function DepensesTab({ data, actions }) {
                       <span><span className={`bt-tag ${type === "fixe" ? "bt-tag-fixe" : "bt-tag-variable"}`}>{label}</span></span>
                       <span className="bt-total-chip">{eur(sum)}</span>
                     </div>
-                    {type === "fixe" && <RecurringList rules={expenseRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />}
+                    {type === "fixe" && expenseRules.length > 0 && (
+                      <details className="bt-rec-details">
+                        <summary>Récurrences actives ({expenseRules.length}) — pour les arrêter</summary>
+                        <RecurringList rules={expenseRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
+                      </details>
+                    )}
                     {items.length === 0 ? <EmptyState text={`Aucune dépense ${type} sur cette période.`} /> : (
                       <ul className="bt-list bt-list-scroll">
                         {items.map((e) => (
                           <li key={e.id}>
                             <div className="bt-list-main">
-                              <span className="bt-list-title">{e.category}{e.recurringId && <Repeat size={12} className="bt-recurring-mark" />}</span>
+                              <span className="bt-list-title">{e.category}{e.recurringId && <Repeat size={12} className="bt-recurring-mark" style={{ color: type === "fixe" ? "#24504D" : "#B0562F" }} />}</span>
                               <span className="bt-list-sub">{new Date(e.date).toLocaleDateString("fr-FR")}</span>
                             </div>
                             <div className="bt-list-amount">{eur(e.amount)}</div>
@@ -2483,6 +2488,9 @@ export default function App() {
         .bt-freq-row span { font-size: 13px; color: var(--bt-ink-soft); font-weight: 500; white-space: nowrap; }
         .bt-freq-row input { width: 64px; padding: 10px 11px; border: 1px solid var(--bt-border); border-radius: 9px; font-size: 14px; background: var(--bt-bg); }
         .bt-freq-row select { flex: 1; padding: 10px 11px; border: 1px solid var(--bt-border); border-radius: 9px; font-size: 14px; background: var(--bt-bg); }
+        .bt-rec-details { margin-bottom: 10px; }
+        .bt-rec-details summary { cursor: pointer; font-size: 12.5px; color: var(--bt-ink-soft); padding: 4px 0; }
+        .bt-rec-details .bt-recurring-chip { background: var(--bt-surface-alt); color: var(--bt-ink); }
         .bt-recurring-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
         .bt-recurring-chip { display: flex; align-items: center; gap: 8px; background: var(--bt-amber-soft); color: var(--bt-amber); font-size: 12.5px; font-weight: 600; padding: 7px 10px; border-radius: 9px; }
         .bt-recurring-chip span { flex: 1; }
