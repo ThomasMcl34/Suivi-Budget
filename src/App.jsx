@@ -1131,6 +1131,7 @@ function PlacementsTab({ data, actions }) {
         )}
       </div>
 
+      <div className="bt-two-col bt-cal-chart-row">
       <div className="bt-card">
         <div className="bt-card-head">
           <h3>Échéancier des placements</h3>
@@ -1202,6 +1203,7 @@ function PlacementsTab({ data, actions }) {
             </ResponsiveContainer>
           </>
         )}
+      </div>
       </div>
 
       <div className="bt-flow-row">
@@ -2358,6 +2360,8 @@ export default function App() {
         @media (max-width: 1100px) { .bt-epargne-cols { grid-template-columns: 1fr; gap: 28px; } }
         .bt-dep-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr); gap: 16px; align-items: start; }
         @media (max-width: 1100px) { .bt-dep-cols { grid-template-columns: 1fr; } }
+        .bt-cal-chart-row { align-items: start; }
+        .bt-cal-chart-row > .bt-card { min-width: 0; }
         .bt-flow-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; align-items: start; }
         @media (max-width: 1100px) { .bt-flow-row { grid-template-columns: 1fr; } }
         .bt-col-buy .bt-hist-col-title { color: #2F6FB0; border-bottom-color: #2F6FB0; }
