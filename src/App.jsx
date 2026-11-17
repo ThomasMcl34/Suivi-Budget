@@ -1392,8 +1392,6 @@ function AVForm({ editingDeposit = null, onSubmitOnce, onSubmitEdit, onSubmitRec
 
 function AVTab({ data, actions }) {
   const { avDeposits, rules } = data;
-  const [chartPeriod, setChartPeriod] = usePersistentState("av_period", "tout");
-  const [chartOffset, setChartOffset] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [editingDeposit, setEditingDeposit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -1404,38 +1402,11 @@ function AVTab({ data, actions }) {
   const thisMonth = avDeposits.filter((d) => { const dt = new Date(d.date); return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear(); }).reduce((s, d) => s + Number(d.amount), 0);
   const sortedDeposits = useMemo(() => [...avDeposits].sort((a, b) => new Date(b.date) - new Date(a.date)), [avDeposits]);
 
-  const chartData = useMemo(() => {
-    const buckets = bucketsForPeriod(chartPeriod, chartOffset);
-    const sorted = [...avDeposits].sort((a, b) => new Date(a.date) - new Date(b.date));
-    return buckets.map((b) => {
-      const total = sorted.filter((d) => new Date(d.date) <= b.end).reduce((s, d) => s + Number(d.amount), 0);
-      return { label: b.label, total };
-    });
-  }, [avDeposits, chartPeriod, chartOffset]);
-
   return (
     <div className="bt-tab">
       <div className="bt-grid-stats">
         <StatCard label="Total versé (approximatif)" value={eur(total)} sub={`${avDeposits.length} versement(s)`} />
         <StatCard label="Versé ce mois-ci" value={eur(thisMonth)} />
-      </div>
-
-      <div className="bt-card">
-        <div className="bt-card-head"><h3>Évolution des versements cumulés</h3></div>
-        {avDeposits.length === 0 ? <EmptyState text="Ajoute ton premier versement pour voir le graphique." /> : (
-          <>
-            <PeriodNav period={chartPeriod} onPeriodChange={setChartPeriod} offset={chartOffset} onOffsetChange={setChartOffset} />
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--bt-border)" vertical={false} />
-                <XAxis dataKey="label" interval={tickInterval(chartData.length)} tick={{ fontSize: 11, fill: "var(--bt-ink-soft)" }} axisLine={{ stroke: "var(--bt-border)" }} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "var(--bt-ink-soft)" }} axisLine={false} tickLine={false} width={54} tickFormatter={formatAxisEur} />
-                <Tooltip formatter={(v) => eur(v)} contentStyle={{ background: "var(--bt-surface)", border: "1px solid var(--bt-border)", borderRadius: 10, fontSize: 12 }} />
-                <Line dataKey="total" name="Total versé" stroke="#2F6FB0" strokeWidth={2.5} dot={false} type="monotone" />
-              </LineChart>
-            </ResponsiveContainer>
-          </>
-        )}
       </div>
 
       <div className="bt-card">
