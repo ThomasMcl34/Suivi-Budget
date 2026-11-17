@@ -1204,13 +1204,37 @@ function PlacementsTab({ data, actions }) {
         )}
       </div>
 
+      <div className="bt-flow-row">
+      <div className="bt-card">
+        <div className="bt-card-head">
+          <h3>Versements par plateforme</h3>
+          <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowDepositForm(true)}><Plus size={16} /> Ajouter</button>
+        </div>
+        <RecurringList rules={depositRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
+        {deposits.length === 0 ? <EmptyState text="Aucun versement enregistré." /> : (
+          <ul className="bt-list">
+            {[...deposits].sort((a, b) => new Date(b.date) - new Date(a.date)).map((d) => (
+              <li key={d.id}>
+                <div className="bt-list-main">
+                  <span className="bt-list-title">{PLATFORMS.find((p) => p.id === d.platform)?.label}{d.recurringId && <Repeat size={12} className="bt-recurring-mark" />}</span>
+                  <span className="bt-list-sub">{new Date(d.date).toLocaleDateString("fr-FR")}</span>
+                </div>
+                <div className="bt-list-amount">{eur(d.amount)}</div>
+                <button className="bt-icon-btn" onClick={() => setEditingDeposit(d)}><Pencil size={16} /></button>
+                <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "deposit", id: d.id })}><Trash2 size={16} /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div className="bt-card">
         <div className="bt-card-head">
           <h3>Historique des achats et des ventes</h3>
         </div>
         <div className="bt-hist-cols">
-          <div className="bt-hist-col">
-            <div className="bt-hist-col-title">Achats <span className="bt-total-chip">{eur(totalAchats)}</span></div>
+          <div className="bt-hist-col bt-col-buy">
+            <div className="bt-hist-col-title"><span>▼ Achats</span> <span className="bt-total-chip">{eur(totalAchats)}</span></div>
             <RecurringList rules={transactionRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
             {sortedTx.length === 0 ? <EmptyState text="Aucun achat pour l'instant." /> : (
               <ul className="bt-list bt-list-scroll">
@@ -1228,8 +1252,8 @@ function PlacementsTab({ data, actions }) {
               </ul>
             )}
           </div>
-          <div className="bt-hist-col">
-            <div className="bt-hist-col-title">Ventes <span className="bt-total-chip">{eur(totalVentes)}</span></div>
+          <div className="bt-hist-col bt-col-sell">
+            <div className="bt-hist-col-title"><span>▲ Ventes</span> <span className="bt-total-chip">{eur(totalVentes)}</span></div>
             {sortedSales.length === 0 ? <EmptyState text="Aucune vente pour l'instant." /> : (
               <ul className="bt-list bt-list-scroll">
                 {sortedSales.map((v) => {
@@ -1255,28 +1279,6 @@ function PlacementsTab({ data, actions }) {
           </div>
         </div>
       </div>
-
-      <div className="bt-card">
-        <div className="bt-card-head">
-          <h3>Versements par plateforme</h3>
-          <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowDepositForm(true)}><Plus size={16} /> Ajouter</button>
-        </div>
-        <RecurringList rules={depositRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
-        {deposits.length === 0 ? <EmptyState text="Aucun versement enregistré." /> : (
-          <ul className="bt-list">
-            {[...deposits].sort((a, b) => new Date(b.date) - new Date(a.date)).map((d) => (
-              <li key={d.id}>
-                <div className="bt-list-main">
-                  <span className="bt-list-title">{PLATFORMS.find((p) => p.id === d.platform)?.label}{d.recurringId && <Repeat size={12} className="bt-recurring-mark" />}</span>
-                  <span className="bt-list-sub">{new Date(d.date).toLocaleDateString("fr-FR")}</span>
-                </div>
-                <div className="bt-list-amount">{eur(d.amount)}</div>
-                <button className="bt-icon-btn" onClick={() => setEditingDeposit(d)}><Pencil size={16} /></button>
-                <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "deposit", id: d.id })}><Trash2 size={16} /></button>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
 
       <Modal open={showTxForm} title="Ajouter un achat" onClose={() => setShowTxForm(false)}>
@@ -2356,6 +2358,16 @@ export default function App() {
         @media (max-width: 1100px) { .bt-epargne-cols { grid-template-columns: 1fr; gap: 28px; } }
         .bt-dep-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr); gap: 16px; align-items: start; }
         @media (max-width: 1100px) { .bt-dep-cols { grid-template-columns: 1fr; } }
+        .bt-flow-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+        @media (max-width: 1100px) { .bt-flow-row { grid-template-columns: 1fr; } }
+        .bt-col-buy .bt-hist-col-title { color: #2F6FB0; border-bottom-color: #2F6FB0; }
+        .bt-col-sell .bt-hist-col-title { color: #8858B0; border-bottom-color: #8858B0; }
+        .bt-col-buy .bt-hist-col-title .bt-total-chip { background: rgba(47,111,176,0.12); color: #2F6FB0; }
+        .bt-col-sell .bt-hist-col-title .bt-total-chip { background: rgba(136,88,176,0.12); color: #8858B0; }
+        .bt-col-buy .bt-list li { border-left: 3px solid #2F6FB0; padding-left: 10px; }
+        .bt-col-sell .bt-list li { border-left: 3px solid #8858B0; padding-left: 10px; }
+        .bt-col-buy .bt-list li:hover { background: rgba(47,111,176,0.05); }
+        .bt-col-sell .bt-list li:hover { background: rgba(136,88,176,0.05); }
         .bt-hist-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
         .bt-hist-col { min-width: 0; }
         .bt-hist-col-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 14px; padding-bottom: 8px; border-bottom: 2px solid var(--bt-border); margin-bottom: 4px; }
