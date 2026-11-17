@@ -1613,17 +1613,12 @@ function DepensesTab({ data, actions }) {
         />
       </div>
 
-      <div className="bt-card">
-        <div className="bt-card-head">
-          <h3>Période affichée</h3>
-          <span className="bt-total-chip">{eur(totalPeriode)}</span>
-        </div>
-        <PeriodNav period={period} onPeriodChange={setPeriod} offset={offset} onOffsetChange={setOffset} />
-      </div>
-
-      <div className="bt-two-col">
+      <div className="bt-stack">
         <div className="bt-card">
-          <div className="bt-card-head"><h3>Répartition par catégorie</h3></div>
+          <div className="bt-rep-head">
+            <h3>Répartition par catégorie</h3>
+            <PeriodNav period={period} onPeriodChange={setPeriod} offset={offset} onOffsetChange={setOffset} />
+          </div>
           {catData.length === 0 ? <EmptyState text="Aucune dépense sur cette période." /> : (
             <>
               <div className="bt-cat-legend">
@@ -1657,21 +1652,37 @@ function DepensesTab({ data, actions }) {
               <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowForm(true)}><Plus size={16} /> Ajouter une dépense</button>
             </div>
           </div>
-          <RecurringList rules={expenseRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
-          {filtered.length === 0 ? <EmptyState text="Aucune dépense sur cette période." /> : (
-            <ul className="bt-list bt-list-scroll">
-              {filtered.map((e) => (
-                <li key={e.id}>
-                  <div className="bt-list-main">
-                    <span className="bt-list-title">{e.category} <span className={`bt-tag ${e.type === "fixe" ? "bt-tag-fixe" : "bt-tag-variable"}`}>{e.type}</span>{e.recurringId && <Repeat size={12} className="bt-recurring-mark" />}</span>
-                    <span className="bt-list-sub">{new Date(e.date).toLocaleDateString("fr-FR")}</span>
+          {filtered.length === 0 && expenseRules.length === 0 ? <EmptyState text="Aucune dépense sur cette période." /> : (
+            <div className="bt-hist-cols">
+              {[["fixe", "Fixe"], ["variable", "Variable"]].map(([type, label]) => {
+                const items = filtered.filter((e) => e.type === type);
+                const sum = items.reduce((t, e) => t + Number(e.amount), 0);
+                return (
+                  <div className="bt-hist-col" key={type}>
+                    <div className="bt-hist-col-title">
+                      <span><span className={`bt-tag ${type === "fixe" ? "bt-tag-fixe" : "bt-tag-variable"}`}>{label}</span></span>
+                      <span className="bt-total-chip">{eur(sum)}</span>
+                    </div>
+                    {type === "fixe" && <RecurringList rules={expenseRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />}
+                    {items.length === 0 ? <EmptyState text={`Aucune dépense ${type} sur cette période.`} /> : (
+                      <ul className="bt-list bt-list-scroll">
+                        {items.map((e) => (
+                          <li key={e.id}>
+                            <div className="bt-list-main">
+                              <span className="bt-list-title">{e.category}{e.recurringId && <Repeat size={12} className="bt-recurring-mark" />}</span>
+                              <span className="bt-list-sub">{new Date(e.date).toLocaleDateString("fr-FR")}</span>
+                            </div>
+                            <div className="bt-list-amount">{eur(e.amount)}</div>
+                            <button className="bt-icon-btn" onClick={() => setEditingExpense(e)}><Pencil size={16} /></button>
+                            <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "expense", id: e.id })}><Trash2 size={16} /></button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  <div className="bt-list-amount">{eur(e.amount)}</div>
-                  <button className="bt-icon-btn" onClick={() => setEditingExpense(e)}><Pencil size={16} /></button>
-                  <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "expense", id: e.id })}><Trash2 size={16} /></button>
-                </li>
-              ))}
-            </ul>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
@@ -2322,6 +2333,10 @@ export default function App() {
           .bt-cal-main { font-size: 11px; }
           .bt-cal-semaine .bt-cal-cell { min-height: 76px; }
         }
+        .bt-rep-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 6px; }
+        .bt-rep-head h3 { margin: 0; }
+        .bt-rep-head .bt-period-nav { margin-bottom: 0; }
+        .bt-rep-head .bt-segment { margin-bottom: 0; }
         .bt-cat-legend { display: flex; gap: 14px; font-size: 12px; color: var(--bt-ink-soft); margin-bottom: 10px; }
         .bt-cat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
         .bt-cat-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; margin-bottom: 4px; }
@@ -2334,6 +2349,7 @@ export default function App() {
         .bt-epargne-col { min-width: 0; }
         .bt-epargne-col .bt-hist-col-title { margin-bottom: 14px; font-size: 16px; }
         @media (max-width: 1100px) { .bt-epargne-cols { grid-template-columns: 1fr; gap: 28px; } }
+        .bt-stack { display: flex; flex-direction: column; gap: 16px; }
         .bt-hist-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
         .bt-hist-col { min-width: 0; }
         .bt-hist-col-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 14px; padding-bottom: 8px; border-bottom: 2px solid var(--bt-border); margin-bottom: 4px; }
