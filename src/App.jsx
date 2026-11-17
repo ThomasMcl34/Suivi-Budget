@@ -38,8 +38,7 @@ const PERIODS = [
 const TABS = [
   { id: "accueil", label: "Accueil", icon: Home },
   { id: "placements", label: "Placements", icon: TrendingUp },
-  { id: "av", label: "Assurance vie", short: "Ass. vie", icon: Umbrella },
-  { id: "livrets", label: "Livrets", icon: PiggyBank },
+  { id: "epargne", label: "Épargne", icon: PiggyBank },
   { id: "depenses", label: "Dépenses", icon: Receipt },
   { id: "graphes", label: "Graphes", icon: BarChart3 },
 ];
@@ -1207,47 +1206,54 @@ function PlacementsTab({ data, actions }) {
 
       <div className="bt-card">
         <div className="bt-card-head">
-          <h3>Historique des achats</h3>
+          <h3>Historique des achats et des ventes</h3>
         </div>
-        <RecurringList rules={transactionRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
-        {sortedTx.length === 0 ? <EmptyState text="Aucun achat pour l'instant." /> : (
-          <ul className="bt-list bt-list-scroll">
-            {sortedTx.map((t) => (
-              <li key={t.id}>
-                <div className="bt-list-main">
-                  <span className="bt-list-title">{t.name} <span className="bt-tag">{t.category}</span>{t.recurringId && <Repeat size={12} className="bt-recurring-mark" />}</span>
-                  <span className="bt-list-sub">{formatQty(t.quantity)} × {eur(t.price)} · {PLATFORMS.find((p) => p.id === t.platform)?.label} · {new Date(t.date).toLocaleDateString("fr-FR")}</span>
-                </div>
-                <div className="bt-list-amount">{eur(t.quantity * t.price)}</div>
-                <button className="bt-icon-btn" onClick={() => setEditingTx(t)}><Pencil size={16} /></button>
-                <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "tx", id: t.id })}><Trash2 size={16} /></button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="bt-card">
-        <div className="bt-card-head"><h3>Historique des ventes</h3></div>
-        {sortedSales.length === 0 ? <EmptyState text="Aucune vente pour l'instant." /> : (
-          <ul className="bt-list bt-list-scroll">
-            {sortedSales.map((v) => {
-              const pos = positions.find((p) => p.key === `${v.platform}|${v.category}|${v.name}`);
-              const pl = v.quantity * v.salePrice - v.quantity * (pos ? pos.avgPrice : 0);
-              return (
-                <li key={v.id}>
-                  <div className="bt-list-main">
-                    <span className="bt-list-title">{v.name} <span className="bt-tag">{v.category}</span></span>
-                    <span className="bt-list-sub">{formatQty(v.quantity)} × {eur(v.salePrice)} · {PLATFORMS.find((p) => p.id === v.platform)?.label} · {new Date(v.date).toLocaleDateString("fr-FR")}</span>
-                  </div>
-                  <div className="bt-list-amount"><DeltaPill value={pl} size="sm" /></div>
-                  {pos && <button className="bt-icon-btn" onClick={() => { setSellPosition(pos); setEditingSale(v); }}><Pencil size={16} /></button>}
-                  <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "sale", id: v.id })}><Trash2 size={16} /></button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <div className="bt-hist-cols">
+          <div className="bt-hist-col">
+            <div className="bt-hist-col-title">Achats <span className="bt-total-chip">{eur(totalAchats)}</span></div>
+            <RecurringList rules={transactionRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
+            {sortedTx.length === 0 ? <EmptyState text="Aucun achat pour l'instant." /> : (
+              <ul className="bt-list bt-list-scroll">
+                {sortedTx.map((t) => (
+                  <li key={t.id}>
+                    <div className="bt-list-main">
+                      <span className="bt-list-title">{t.name} <span className="bt-tag">{t.category}</span>{t.recurringId && <Repeat size={12} className="bt-recurring-mark" />}</span>
+                      <span className="bt-list-sub">{formatQty(t.quantity)} × {eur(t.price)} · {PLATFORMS.find((p) => p.id === t.platform)?.label} · {new Date(t.date).toLocaleDateString("fr-FR")}</span>
+                    </div>
+                    <div className="bt-list-amount">{eur(t.quantity * t.price)}</div>
+                    <button className="bt-icon-btn" onClick={() => setEditingTx(t)}><Pencil size={16} /></button>
+                    <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "tx", id: t.id })}><Trash2 size={16} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="bt-hist-col">
+            <div className="bt-hist-col-title">Ventes <span className="bt-total-chip">{eur(totalVentes)}</span></div>
+            {sortedSales.length === 0 ? <EmptyState text="Aucune vente pour l'instant." /> : (
+              <ul className="bt-list bt-list-scroll">
+                {sortedSales.map((v) => {
+                  const pos = positions.find((p) => p.key === `${v.platform}|${v.category}|${v.name}`);
+                  const pl = v.quantity * v.salePrice - v.quantity * (pos ? pos.avgPrice : 0);
+                  return (
+                    <li key={v.id}>
+                      <div className="bt-list-main">
+                        <span className="bt-list-title">{v.name} <span className="bt-tag">{v.category}</span></span>
+                        <span className="bt-list-sub">{formatQty(v.quantity)} × {eur(v.salePrice)} · {PLATFORMS.find((p) => p.id === v.platform)?.label} · {new Date(v.date).toLocaleDateString("fr-FR")}</span>
+                      </div>
+                      <div className="bt-list-amount bt-sale-amount">
+                        <div>{eur(v.quantity * v.salePrice)}</div>
+                        <DeltaPill value={pl} size="sm" />
+                      </div>
+                      {pos && <button className="bt-icon-btn" onClick={() => { setSellPosition(pos); setEditingSale(v); }}><Pencil size={16} /></button>}
+                      <button className="bt-icon-btn bt-icon-danger" onClick={() => setConfirmDelete({ type: "sale", id: v.id })}><Trash2 size={16} /></button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="bt-card">
@@ -1573,7 +1579,6 @@ function DepensesTab({ data, actions }) {
   const { expenses, settings, rules } = data;
   const [period, setPeriod] = usePersistentState("depenses_period", "1m");
   const [offset, setOffset] = useState(0);
-  const [mode, setMode] = usePersistentState("depenses_mode", "eur");
   const [showForm, setShowForm] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -1592,22 +1597,15 @@ function DepensesTab({ data, actions }) {
   const filtered = useMemo(() => expenses.filter((e) => inPeriodRange(e.date, period, offset)).sort((a, b) => new Date(b.date) - new Date(a.date)), [expenses, period, offset]);
   const totalPeriode = filtered.reduce((s, e) => s + Number(e.amount), 0);
 
-  const chartData = useMemo(() => {
-    const buckets = bucketsForPeriod(period, offset);
-    return buckets.map((b) => {
-      const inBucket = expenses.filter((e) => { const d = new Date(e.date); return d >= b.start && d <= b.end; });
-      const fixe = inBucket.filter((e) => e.type === "fixe").reduce((s, e) => s + Number(e.amount), 0);
-      const variable = inBucket.filter((e) => e.type === "variable").reduce((s, e) => s + Number(e.amount), 0);
-      if (mode === "pct" && totalPeriode > 0) return { label: b.label, fixe: (fixe / totalPeriode) * 100, variable: (variable / totalPeriode) * 100 };
-      return { label: b.label, fixe, variable };
-    });
-  }, [expenses, period, offset, mode, totalPeriode]);
-
   const catData = useMemo(() => {
     const map = {};
-    filtered.forEach((e) => { map[e.category] = (map[e.category] || 0) + Number(e.amount); });
-    return Object.entries(map).map(([name, value], i) => ({ name, value, color: POSITION_COLORS[i % POSITION_COLORS.length] })).sort((a, b) => b.value - a.value);
+    filtered.forEach((e) => {
+      if (!map[e.category]) map[e.category] = { name: e.category, fixe: 0, variable: 0 };
+      map[e.category][e.type === "fixe" ? "fixe" : "variable"] += Number(e.amount);
+    });
+    return Object.values(map).map((c) => ({ ...c, value: c.fixe + c.variable })).sort((x, y) => y.value - x.value);
   }, [filtered]);
+  const catMax = catData.length ? catData[0].value : 0;
 
   return (
     <div className="bt-tab">
@@ -1646,42 +1644,48 @@ function DepensesTab({ data, actions }) {
 
       <div className="bt-card">
         <div className="bt-card-head">
-          <h3>Dépenses par période</h3>
-          <div className="bt-controls-row">
-            <ModeToggle value={mode} onChange={setMode} />
-            <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowForm(true)}><Plus size={16} /> Ajouter</button>
-          </div>
+          <h3>Période affichée</h3>
+          <span className="bt-total-chip">{eur(totalPeriode)}</span>
         </div>
         <PeriodNav period={period} onPeriodChange={setPeriod} offset={offset} onOffsetChange={setOffset} />
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--bt-border)" vertical={false} />
-            <XAxis dataKey="label" interval={tickInterval(chartData.length)} tick={{ fontSize: 11, fill: "var(--bt-ink-soft)" }} axisLine={{ stroke: "var(--bt-border)" }} tickLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: "var(--bt-ink-soft)" }} axisLine={false} tickLine={false} width={54} tickFormatter={(v) => mode === "pct" ? `${v.toFixed(0)}%` : formatAxisEur(v)} />
-            <Tooltip formatter={(v) => mode === "pct" ? `${v.toFixed(1)}%` : eur(v)} contentStyle={{ background: "var(--bt-surface)", border: "1px solid var(--bt-border)", borderRadius: 10, fontSize: 12 }} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="fixe" name="Fixe" stackId="a" fill="#24504D" radius={[0, 0, 0, 0]} />
-            <Bar dataKey="variable" name="Variable" stackId="a" fill="#C97A3E" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
       </div>
 
       <div className="bt-two-col">
         <div className="bt-card">
           <div className="bt-card-head"><h3>Répartition par catégorie</h3></div>
           {catData.length === 0 ? <EmptyState text="Aucune dépense sur cette période." /> : (
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={catData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                  {catData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                </Pie>
-                <Tooltip formatter={(v) => eur(v)} contentStyle={{ background: "var(--bt-surface)", border: "1px solid var(--bt-border)", borderRadius: 10, fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
+            <>
+              <div className="bt-cat-legend">
+                <span><i className="bt-cal-swatch" style={{ background: "#24504D" }} />Fixe</span>
+                <span><i className="bt-cal-swatch" style={{ background: "#C97A3E" }} />Variable</span>
+              </div>
+              <ul className="bt-cat-list">
+                {catData.map((c) => (
+                  <li key={c.name}>
+                    <div className="bt-cat-row">
+                      <span className="bt-cat-name">{c.name}</span>
+                      <span className="bt-cat-amount">{eur(c.value)} <em>{totalPeriode > 0 ? Math.round((c.value / totalPeriode) * 100) : 0} %</em></span>
+                    </div>
+                    <div className="bt-cat-track">
+                      <div className="bt-cat-bar" style={{ width: `${catMax > 0 ? (c.value / catMax) * 100 : 0}%` }}>
+                        {c.fixe > 0 && <div style={{ flex: c.fixe, background: "#24504D" }} title={`Fixe ${eur(c.fixe)}`} />}
+                        {c.variable > 0 && <div style={{ flex: c.variable, background: "#C97A3E" }} title={`Variable ${eur(c.variable)}`} />}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
         <div className="bt-card">
-          <div className="bt-card-head"><h3>Détail des dépenses</h3><span className="bt-total-chip">{eur(totalPeriode)}</span></div>
+          <div className="bt-card-head">
+            <h3>Détail des dépenses</h3>
+            <div className="bt-controls-row">
+              <span className="bt-total-chip">{eur(totalPeriode)}</span>
+              <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowForm(true)}><Plus size={16} /> Ajouter une dépense</button>
+            </div>
+          </div>
           <RecurringList rules={expenseRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
           {filtered.length === 0 ? <EmptyState text="Aucune dépense sur cette période." /> : (
             <ul className="bt-list bt-list-scroll">
@@ -2347,6 +2351,23 @@ export default function App() {
           .bt-cal-main { font-size: 11px; }
           .bt-cal-semaine .bt-cal-cell { min-height: 76px; }
         }
+        .bt-cat-legend { display: flex; gap: 14px; font-size: 12px; color: var(--bt-ink-soft); margin-bottom: 10px; }
+        .bt-cat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+        .bt-cat-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; margin-bottom: 4px; }
+        .bt-cat-name { font-weight: 600; }
+        .bt-cat-amount { font-family: 'Space Mono', monospace; font-size: 12.5px; }
+        .bt-cat-amount em { font-style: normal; color: var(--bt-ink-soft); margin-left: 6px; }
+        .bt-cat-track { background: var(--bt-surface-alt); border-radius: 6px; height: 12px; overflow: hidden; }
+        .bt-cat-bar { display: flex; height: 100%; border-radius: 6px; overflow: hidden; }
+        .bt-epargne-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+        .bt-epargne-col { min-width: 0; }
+        .bt-epargne-col .bt-hist-col-title { margin-bottom: 14px; font-size: 16px; }
+        @media (max-width: 1100px) { .bt-epargne-cols { grid-template-columns: 1fr; gap: 28px; } }
+        .bt-hist-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+        .bt-hist-col { min-width: 0; }
+        .bt-hist-col-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 14px; padding-bottom: 8px; border-bottom: 2px solid var(--bt-border); margin-bottom: 4px; }
+        .bt-sale-amount { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+        @media (max-width: 860px) { .bt-hist-cols { grid-template-columns: 1fr; gap: 18px; } }
         .bt-period-custom { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 2px; font-size: 13px; color: var(--bt-ink-soft); }
         .bt-period-custom input { margin-left: 6px; padding: 6px 8px; border: 1px solid var(--bt-border); border-radius: 8px; background: var(--bt-surface); color: var(--bt-ink); font: inherit; }
         .bt-period-window { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
@@ -2545,8 +2566,18 @@ export default function App() {
             </div>
             {tab === "accueil" && <AccueilTab data={data} actions={actions} />}
             {tab === "placements" && <PlacementsTab data={data} actions={actions} />}
-            {tab === "av" && <AVTab data={data} actions={actions} />}
-            {tab === "livrets" && <LivretsTab data={data} actions={actions} />}
+            {tab === "epargne" && (
+              <div className="bt-epargne-cols">
+                <div className="bt-epargne-col">
+                  <div className="bt-hist-col-title">Assurance vie</div>
+                  <AVTab data={data} actions={actions} />
+                </div>
+                <div className="bt-epargne-col">
+                  <div className="bt-hist-col-title">Livrets</div>
+                  <LivretsTab data={data} actions={actions} />
+                </div>
+              </div>
+            )}
             {tab === "depenses" && <DepensesTab data={data} actions={actions} />}
             {tab === "graphes" && <GraphesTab data={data} />}
           </main>
