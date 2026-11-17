@@ -1613,7 +1613,7 @@ function DepensesTab({ data, actions }) {
         />
       </div>
 
-      <div className="bt-stack">
+      <div className="bt-dep-cols">
         <div className="bt-card">
           <div className="bt-rep-head">
             <h3>Répartition par catégorie</h3>
@@ -2354,7 +2354,8 @@ export default function App() {
         .bt-epargne-col { min-width: 0; }
         .bt-epargne-col .bt-hist-col-title { margin-bottom: 14px; font-size: 16px; }
         @media (max-width: 1100px) { .bt-epargne-cols { grid-template-columns: 1fr; gap: 28px; } }
-        .bt-stack { display: flex; flex-direction: column; gap: 16px; }
+        .bt-dep-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr); gap: 16px; align-items: start; }
+        @media (max-width: 1100px) { .bt-dep-cols { grid-template-columns: 1fr; } }
         .bt-hist-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
         .bt-hist-col { min-width: 0; }
         .bt-hist-col-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 14px; padding-bottom: 8px; border-bottom: 2px solid var(--bt-border); margin-bottom: 4px; }
