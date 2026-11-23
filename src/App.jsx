@@ -7,6 +7,7 @@ import {
   Home, TrendingUp, Umbrella, Receipt, BarChart3, Plus, Trash2, X,
   ChevronLeft, ChevronRight, Wallet, AlertTriangle, Landmark, Loader2, Repeat, Pencil, PiggyBank,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import * as api from "./lib/api.js";
 
 /* ============================== CONSTANTES ============================== */
@@ -867,6 +868,43 @@ function TransactionForm({ existingAssets = [], livePrices = {}, editingTx = nul
   );
 }
 
+function PositionEditForm({ position, onSubmit, onCancel }) {
+  const [name, setName] = useState(position.name);
+  const [category, setCategory] = useState(position.category);
+  const [symbol, setSymbol] = useState(position.symbol || "");
+  const [isPEA, setIsPEA] = useState(position.account !== "CTO");
+  const isTR = position.platform === "traderepublic";
+  const valid = name.trim().length > 0;
+  return (
+    <div className="bt-form">
+      <div className="bt-form-preview">
+        {position.txs.length} achat(s) et {position.sells.length} vente(s) rattachés à cette position. Les modifications s'appliquent à tous.
+      </div>
+      <FieldRow label="Nom">
+        <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+      </FieldRow>
+      <FieldRow label="Catégorie">
+        <select value={category} onChange={(e) => setCategory(e.target.value)}>
+          {CATEGORIES_INVEST.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </FieldRow>
+      <FieldRow label={category === "Crypto" ? "Symbole (paire en euros, ex. BTCEUR, ETHEUR)" : "Symbole Marketstack (ex. HO.XPAR, SAF.XPAR, ETSZ.XETR)"}>
+        <input type="text" value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="vide = pas de prix en direct" />
+      </FieldRow>
+      {isTR && (
+        <label className="bt-check-row">
+          <input type="checkbox" checked={isPEA} onChange={(e) => setIsPEA(e.target.checked)} />
+          <span>Placement dans un <strong>PEA</strong> <em>(décoché = CTO)</em></span>
+        </label>
+      )}
+      <div className="bt-modal-actions">
+        <button className="bt-btn-ghost" onClick={onCancel}>Annuler</button>
+        <button className="bt-btn-primary" disabled={!valid} onClick={() => onSubmit({ name: name.trim(), category, symbol: symbol.trim(), account: isTR ? (isPEA ? "PEA" : "CTO") : undefined })}>Enregistrer</button>
+      </div>
+    </div>
+  );
+}
+
 function SellForm({ position, editingSale = null, onSubmit, onSubmitEdit, onCancel }) {
   const isEditing = !!editingSale;
   const isCrypto = position.category === "Crypto";
@@ -1016,6 +1054,7 @@ function PlacementsTab({ data, actions }) {
   const [showDepositForm, setShowDepositForm] = useState(false);
   const [sellPosition, setSellPosition] = useState(null);
   const [editingTx, setEditingTx] = useState(null);
+  const [editingPosition, setEditingPosition] = useState(null);
   const [editingSale, setEditingSale] = useState(null);
   const [editingDeposit, setEditingDeposit] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -1059,6 +1098,8 @@ function PlacementsTab({ data, actions }) {
   const toggleKey = (key) => setHiddenKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
 
   const [account, setAccount] = usePersistentState("placements_account", "PEA");
+  const [headEl, setHeadEl] = useState(null);
+  useEffect(() => { setHeadEl(document.getElementById("bt-head-actions")); }, []);
 
   // Historique de la valeur du portefeuille à chaque actualisation des prix (mini-courbe du bandeau)
   const valueHistory = useMemo(() => {
@@ -1094,7 +1135,7 @@ function PlacementsTab({ data, actions }) {
             </div>
             <div className="bt-pcard-sub">
               {formatQty(p.qty)} unités{p.realizedPL !== 0 ? ` · déjà réalisé : ${signedEur(p.realizedPL)}` : ""}
-              {!p.symbol ? " · pas de symbole suivi" : p.livePrice == null ? " · prix en direct indisponible" : priceUpdatedAt ? ` · maj ${new Date(priceUpdatedAt).toLocaleDateString("fr-FR")} ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+              {!p.symbol ? " · pas de symbole suivi" : p.livePrice == null ? ` · symbole ${p.symbol} : prix en direct indisponible` : priceUpdatedAt ? ` · maj ${new Date(priceUpdatedAt).toLocaleDateString("fr-FR")} ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}
             </div>
           </div>
           <div className={`bt-sellbox bt-sellbox-${tone}`}>
@@ -1117,6 +1158,7 @@ function PlacementsTab({ data, actions }) {
               Passer en {p.account === "PEA" ? "CTO" : "PEA"}
             </button>
           )}
+          <button className="bt-btn-ghost bt-btn-sm" title="Modifier la position (nom, symbole, compte…)" aria-label="Modifier la position" onClick={() => setEditingPosition(p)}><Pencil size={14} /></button>
           <button className="bt-btn-ghost bt-btn-sm" onClick={() => setSellPosition(p)}>Vendre</button>
           <button className="bt-btn-ghost bt-btn-sm" title="Supprimer la position" aria-label="Supprimer la position" onClick={() => setConfirmDelete({ type: "position", position: p })}><Trash2 size={14} /></button>
         </div>
@@ -1161,23 +1203,25 @@ function PlacementsTab({ data, actions }) {
         </div>
       </div>
 
-      <div className="bt-pf-toolbar">
-        <div className="bt-pf-toolbar-left">
-      {trackedOpen.length > 0 && (
-        <div className="bt-price-bar">
-          <span>
-            <Repeat size={13} />
-            {pricesLoading ? "Actualisation en cours…" : priceUpdatedAt ? `Prix actualisés à ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Clique pour récupérer les prix actuels"}
-          </span>
-          <button className="bt-btn-ghost bt-btn-sm" onClick={() => refreshPrices(trackedOpen)} disabled={pricesLoading}>Actualiser les prix</button>
-          {priceMeta && priceMeta.quotaReached && (
-            <span className="bt-price-note bt-price-note-warn">Quota mensuel d'actualisations atteint — les prix des actions/ETF resteront fixes jusqu'au mois prochain (la crypto continue de s'actualiser).</span>
+      {headEl && createPortal(
+        <>
+          {trackedOpen.length > 0 && (
+            <span className="bt-head-note">
+              {pricesLoading ? "Actualisation…" : priceUpdatedAt ? `Prix actualisés à ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+            </span>
           )}
-        </div>
+          {trackedOpen.length > 0 && (
+            <button className="bt-btn-ghost bt-btn-sm" onClick={() => refreshPrices(trackedOpen)} disabled={pricesLoading}>
+              <Repeat size={14} style={{ verticalAlign: "-2px", marginRight: 5 }} />Actualiser les prix
+            </button>
+          )}
+          <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowTxForm(true)}><Plus size={16} /> Ajouter un achat</button>
+        </>,
+        headEl
       )}
-        </div>
-        <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowTxForm(true)}><Plus size={16} /> Ajouter un achat</button>
-      </div>
+      {priceMeta && priceMeta.quotaReached && (
+        <div className="bt-price-note bt-price-note-warn">Quota mensuel d'actualisations atteint — les prix des actions/ETF resteront fixes jusqu'au mois prochain (la crypto continue de s'actualiser).</div>
+      )}
 
       {openPositions.length === 0 ? <div className="bt-card"><EmptyState text="Aucune position ouverte pour l'instant. Ajoute ton premier achat." /></div> : (
         <div className="bt-pf-cols">
@@ -1211,18 +1255,6 @@ function PlacementsTab({ data, actions }) {
           })}
         </div>
       )}
-
-      <div className="bt-grid-stats">
-        <StatCard label="Versé depuis ma banque" value={eur(totalVerse)} sub={`TR ${eur(totalVerseTR)} · Kraken Pro ${eur(totalVerseBinance)}`} />
-        <StatCard label="Valeur des actifs sur les marchés" value={eur(valeurMarche)} sub={nonSimulees > 0 ? `${nonSimulees} position(s) non simulée(s), valorisée(s) au coût` : `${openPositions.length} position(s) ouverte(s)`} />
-        <StatCard label="Liquidités non réinvesties" value={eur(liquidites)} sub="Versé − investi + produit des ventes" tone={liquidites < 0 ? "neg" : undefined} />
-        <StatCard
-          label="Plus-value latente / réalisée"
-          value={testedOpen.length ? signedEur(pvLatente) : "—"}
-          sub={<>Réalisée (ventes) : <span className={pvRealisee > 0 ? "bt-text-pos" : pvRealisee < 0 ? "bt-text-neg" : ""}>{signedEur(pvRealisee)}</span></>}
-          tone={testedOpen.length ? (pvLatente >= 0 ? "pos" : "neg") : undefined}
-        />
-      </div>
 
       <div className="bt-two-col bt-cal-chart-row">
       <div className="bt-card">
@@ -1303,7 +1335,10 @@ function PlacementsTab({ data, actions }) {
       <div className="bt-card">
         <div className="bt-card-head">
           <h3>Versements par plateforme</h3>
-          <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowDepositForm(true)}><Plus size={16} /> Ajouter</button>
+          <div className="bt-controls-row">
+            <span className="bt-total-chip" title={`Trade Republic ${eur(totalVerseTR)} · Kraken Pro ${eur(totalVerseBinance)}`}>Total {eur(totalVerse)}</span>
+            <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowDepositForm(true)}><Plus size={16} /> Ajouter</button>
+          </div>
         </div>
         <RecurringList rules={depositRules} onDelete={(id) => setConfirmDelete({ type: "rule", id })} />
         {deposits.length === 0 ? <EmptyState text="Aucun versement enregistré." /> : (
@@ -1384,6 +1419,15 @@ function PlacementsTab({ data, actions }) {
           onSubmitRecurring={(rule) => { actions.addRecurringRule(rule); setShowTxForm(false); }}
           onCancel={() => setShowTxForm(false)}
         />
+      </Modal>
+      <Modal open={!!editingPosition} title="Modifier la position" onClose={() => setEditingPosition(null)}>
+        {editingPosition && (
+          <PositionEditForm
+            position={editingPosition}
+            onSubmit={(f) => { actions.updatePosition(editingPosition, f); setEditingPosition(null); }}
+            onCancel={() => setEditingPosition(null)}
+          />
+        )}
       </Modal>
       <Modal open={!!editingTx} title="Modifier l'achat" onClose={() => setEditingTx(null)}>
         {editingTx && (
@@ -2279,6 +2323,20 @@ export default function App() {
     updateDeposit: (d) => { setDeposits((prev) => prev.map((x) => x.id === d.id ? d : x)); api.updateDeposit(d); },
     deleteDeposit: (id) => { setDeposits((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("deposits", id); },
     addTransaction: (t) => { setTransactions((prev) => [...prev, t]); api.insertTransactions([t]); },
+    updatePosition: (p, f) => {
+      const newTxs = p.txs.map((t) => ({ ...t, name: f.name, category: f.category, symbol: f.symbol, ...(f.account ? { account: f.account } : {}) }));
+      const newSales = p.sells.map((v) => ({ ...v, name: f.name, category: f.category }));
+      setTransactions((prev) => prev.map((x) => newTxs.find((n) => n.id === x.id) || x));
+      setSales((prev) => prev.map((x) => newSales.find((n) => n.id === x.id) || x));
+      newTxs.forEach((t) => api.updateTransaction(t));
+      newSales.forEach((v) => api.updateSale(v));
+      const newKey = `${p.platform}|${f.category}|${f.name}`;
+      if (newKey !== p.key && p.testPrice !== "") {
+        setTestPrices((prev) => ({ ...prev, [newKey]: p.testPrice, [p.key]: "" }));
+        api.upsertTestPrice(newKey, p.testPrice);
+        api.upsertTestPrice(p.key, "");
+      }
+    },
     setPositionAccount: (p, account) => {
       const ids = p.txs.map((t) => t.id);
       setTransactions((prev) => prev.map((x) => (ids.includes(x.id) ? { ...x, account } : x)));
@@ -2664,11 +2722,14 @@ export default function App() {
         .bt-pf-small { font-size: 11.5px; color: var(--bt-ink-soft); margin-top: 4px; }
         .bt-pf-spark { flex: 1; min-width: 160px; }
         .bt-pf-sep { width: 1px; align-self: stretch; background: var(--bt-border); }
+        .bt-page-head { gap: 14px; }
+        .bt-head-actions { display: flex; align-items: center; gap: 10px; margin: 0 auto 20px 8px; flex-wrap: wrap; }
+        .bt-head-note { font-size: 12px; color: var(--bt-ink-soft); }
         .bt-pf-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
         .bt-pf-toolbar-left { flex: 1; min-width: 0; }
         .bt-pf-toolbar-left .bt-price-bar { border-radius: 12px; }
 
-        .bt-pf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+        .bt-pf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
         .bt-pf-panel { background: var(--bt-surface); border: 1px solid var(--bt-border); border-radius: 18px; padding: 18px; min-width: 0; }
         .bt-pf-panel-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
         .bt-pf-logo { width: 46px; height: 46px; border-radius: 12px; background: var(--bt-surface-alt); color: var(--bt-teal); display: inline-flex; align-items: center; justify-content: center; }
@@ -2678,7 +2739,7 @@ export default function App() {
         .bt-pf-tabs button { flex: 1; background: none; border: none; border-bottom: 3px solid transparent; color: var(--bt-ink-soft); font-size: 16px; font-weight: 600; padding: 10px 6px; margin-bottom: -1px; }
         .bt-pf-tabs button.active { color: var(--bt-ink); border-bottom-color: var(--bt-green); }
         .bt-pf-count { display: inline-block; background: var(--bt-surface-alt); color: var(--bt-ink-soft); font-size: 12px; padding: 1px 7px; border-radius: 6px; margin-left: 4px; }
-        .bt-pcards { display: flex; flex-direction: column; gap: 10px; }
+        .bt-pcards { display: flex; flex-direction: column; gap: 10px; height: 640px; overflow-y: auto; padding-right: 4px; }
         .bt-pcard-empty { color: var(--bt-ink-soft); font-size: 13.5px; padding: 18px 4px; text-align: center; }
         .bt-pcard { background: var(--bt-bg); border: 1px solid var(--bt-border); border-radius: 14px; padding: 14px; }
         .bt-pcard-top { display: flex; align-items: center; gap: 14px; }
@@ -2708,6 +2769,9 @@ export default function App() {
         @media (max-width: 560px) {
           .bt-pf-big { font-size: 24px; }
           .bt-pf-sep { display: none; }
+          .bt-pcards { height: 560px; }
+          .bt-head-actions { margin-left: 0; width: 100%; order: 3; }
+          .bt-page-head { flex-wrap: wrap; }
           .bt-pcard-top { flex-wrap: wrap; }
           .bt-sellbox { width: 100%; flex-direction: row; justify-content: space-between; align-items: center; }
         }
@@ -2757,6 +2821,7 @@ export default function App() {
           <main className="bt-main">
             <div className="bt-page-head">
               <h1 className="bt-page-title">{TABS.find((t) => t.id === tab)?.label}</h1>
+              <div id="bt-head-actions" className="bt-head-actions" />
               <button className="bt-logout-mobile" onClick={() => api.signOut()}><X size={14} /> Déconnexion</button>
             </div>
             {tab === "accueil" && <AccueilTab data={data} actions={actions} />}
