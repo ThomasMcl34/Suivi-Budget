@@ -1219,18 +1219,6 @@ function PlacementsTab({ data, actions }) {
         </>,
         headEl
       )}
-      {priceMeta && priceMeta.fallbackNote && (
-        <div className="bt-price-note">{priceMeta.fallbackNote}.</div>
-      )}
-      {priceMeta && priceMeta.stockError && (
-        <div className="bt-price-note bt-price-note-warn">Actions / ETF : Marketstack a répondu « {priceMeta.stockError} ».</div>
-      )}
-      {priceMeta && !priceMeta.stockError && priceMeta.missingStocks && priceMeta.missingStocks.length > 0 && (
-        <div className="bt-price-note bt-price-note-warn">Marketstack n'a renvoyé aucun prix pour : {priceMeta.missingStocks.join(", ")}. Vérifie le symbole (bouton crayon de la position).</div>
-      )}
-      {priceMeta && priceMeta.quotaReached && (
-        <div className="bt-price-note bt-price-note-warn">Quota mensuel d'actualisations atteint — les prix des actions/ETF resteront fixes jusqu'au mois prochain (la crypto continue de s'actualiser).</div>
-      )}
 
       {openPositions.length === 0 ? <div className="bt-card"><EmptyState text="Aucune position ouverte pour l'instant. Ajoute ton premier achat." /></div> : (
         <div className="bt-pf-cols">
@@ -2259,6 +2247,13 @@ export default function App() {
   const [livePrices, setLivePrices] = useState({});
   const [priceHistory, setPriceHistory] = useState([]);
   const [priceMeta, setPriceMeta] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const dismissToast = (id) => setToasts((prev) => prev.filter((t) => t.id !== id));
+  const pushToast = (kind, text) => {
+    const id = uid();
+    setToasts((prev) => [...prev, { id, kind, text }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 20000);
+  };
   const [priceUpdatedAt, setPriceUpdatedAt] = useState(null);
   const [pricesLoading, setPricesLoading] = useState(false);
   const [session, setSession] = useState(undefined); // undefined = vérification en cours, null = déconnecté
@@ -2288,6 +2283,16 @@ export default function App() {
     if (newRows.length) { setPriceHistory((prev) => [...prev, ...newRows]); api.insertPriceHistory(newRows); }
     setPriceMeta(meta || null);
     setPriceUpdatedAt(meta?.updatedAt || new Date().toISOString());
+    // Messages en bulles (fermables avec la croix)
+    if (!meta || !meta.updatedAt) {
+      pushToast("warn", "Impossible de récupérer les prix pour le moment. Réessaie dans un instant.");
+    } else {
+      const missing = meta.missingStocks || [];
+      if (meta.fallbackNote) pushToast("info", `${meta.fallbackNote}.`);
+      if (missing.length) pushToast("warn", `Aucun prix trouvé pour : ${missing.join(", ")}. Vérifie le symbole (crayon sur la position).`);
+      else if (!meta.fallbackNote && meta.quotaReached) pushToast("warn", "Quota mensuel Marketstack atteint : les prix des actions/ETF resteront fixes jusqu'au mois prochain (la crypto continue de s'actualiser).");
+      else if (!meta.fallbackNote && meta.stockError) pushToast("warn", `Actions / ETF : Marketstack a répondu « ${meta.stockError} ».`);
+    }
     setPricesLoading(false);
   };
 
@@ -2626,6 +2631,14 @@ export default function App() {
 
         .bt-price-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: var(--bt-surface); border: 1px solid var(--bt-border); border-radius: 12px; padding: 10px 14px; font-size: 12.5px; color: var(--bt-ink-soft); }
         .bt-price-bar > span:first-child { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+        .bt-toasts { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; gap: 8px; width: min(560px, calc(100vw - 24px)); pointer-events: none; }
+        .bt-toast { pointer-events: auto; display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 14px; font-size: 13.5px; font-weight: 500; line-height: 1.4; box-shadow: 0 8px 28px rgba(0,0,0,0.28); border: 1px solid var(--bt-border); background: var(--bt-surface); color: var(--bt-ink); animation: bt-toast-in 0.2s ease-out; }
+        .bt-toast span { flex: 1; }
+        .bt-toast button { background: none; border: none; color: inherit; opacity: 0.7; padding: 2px; display: inline-flex; }
+        .bt-toast button:hover { opacity: 1; }
+        .bt-toast-info { border-left: 4px solid var(--bt-teal); }
+        .bt-toast-warn { border-left: 4px solid var(--bt-amber); }
+        @keyframes bt-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
         .bt-price-note { background: var(--bt-amber-soft); color: var(--bt-amber); padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
         .bt-price-note-warn { background: var(--bt-red-soft); color: var(--bt-red); }
         .bt-tag-live { background: var(--bt-green-soft); color: var(--bt-green); display: inline-flex; align-items: center; gap: 3px; }
@@ -2827,6 +2840,15 @@ export default function App() {
         <div className="bt-loading"><Loader2 className="bt-spin" size={20} style={{ animation: "spin 1s linear infinite" }} /> Chargement de tes données…</div>
       ) : (
         <>
+          <div className="bt-toasts">
+            {toasts.map((t) => (
+              <div key={t.id} className={`bt-toast bt-toast-${t.kind}`}>
+                <span>{t.text}</span>
+                <button onClick={() => dismissToast(t.id)} aria-label="Fermer"><X size={15} /></button>
+              </div>
+            ))}
+          </div>
+
           <main className="bt-main">
             <div className="bt-page-head">
               <h1 className="bt-page-title">{TABS.find((t) => t.id === tab)?.label}</h1>
