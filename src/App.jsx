@@ -1219,6 +1219,9 @@ function PlacementsTab({ data, actions }) {
         </>,
         headEl
       )}
+      {priceMeta && priceMeta.fallbackNote && (
+        <div className="bt-price-note">{priceMeta.fallbackNote}.</div>
+      )}
       {priceMeta && priceMeta.stockError && (
         <div className="bt-price-note bt-price-note-warn">Actions / ETF : Marketstack a répondu « {priceMeta.stockError} ».</div>
       )}
