@@ -8,8 +8,8 @@ import { supabase } from "./supabaseClient.js";
 const toDepositRow = (d) => ({ id: d.id, platform: d.platform, amount: d.amount, date: d.date, recurring_id: d.recurringId || null });
 const fromDepositRow = (r) => ({ id: r.id, platform: r.platform, amount: Number(r.amount), date: r.date, ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
 
-const toTransactionRow = (t) => ({ id: t.id, platform: t.platform, category: t.category, name: t.name, quantity: t.quantity, price: t.price, date: t.date, symbol: t.symbol || null, recurring_id: t.recurringId || null });
-const fromTransactionRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), price: Number(r.price), date: r.date, ...(r.symbol ? { symbol: r.symbol } : {}), ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
+const toTransactionRow = (t) => ({ id: t.id, platform: t.platform, category: t.category, name: t.name, quantity: t.quantity, price: t.price, date: t.date, symbol: t.symbol || null, recurring_id: t.recurringId || null, ...(t.account ? { account: t.account } : {}) });
+const fromTransactionRow = (r) => ({ id: r.id, platform: r.platform, category: r.category, name: r.name, quantity: Number(r.quantity), price: Number(r.price), date: r.date, ...(r.symbol ? { symbol: r.symbol } : {}), ...(r.account ? { account: r.account } : {}), ...(r.recurring_id ? { recurringId: r.recurring_id } : {}) });
 
 const toSaleRow = (v) => ({ id: v.id, platform: v.platform, category: v.category, name: v.name, quantity: v.quantity, sale_price: v.salePrice, date: v.date });
 const toSavingRow = (s) => ({ id: s.id, name: s.name, balance: s.balance, updated_at: s.updatedAt || null });
