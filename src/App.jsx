@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   ResponsiveContainer, ComposedChart, LineChart, Line, Bar, BarChart,
-  PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import {
   Home, TrendingUp, Umbrella, Receipt, BarChart3, Plus, Trash2, X,
@@ -229,6 +229,7 @@ function computePositions(transactions, sales, testPrices, livePrices = {}) {
     p.boughtQty += Number(t.quantity);
     p.boughtCost += Number(t.quantity) * Number(t.price);
     if (t.symbol) p.symbol = t.symbol;
+    if (t.account) p.account = t.account;
     p.txs.push(t);
   });
   sales.forEach((s) => {
@@ -241,6 +242,8 @@ function computePositions(transactions, sales, testPrices, livePrices = {}) {
   });
   return Array.from(map.values()).map((p) => {
     const avgPrice = p.boughtQty > 0 ? p.boughtCost / p.boughtQty : 0;
+    // Compte Trade Republic : PEA ou CTO (par défaut PEA, sauf un nom contenant « hors PEA »)
+    const account = p.platform !== "traderepublic" ? null : (p.account || (/hors\s*pea/i.test(p.name) ? "CTO" : "PEA"));
     const rawQty = p.boughtQty - p.soldQty;
     const qty = rawQty <= Math.max(1e-9, p.boughtQty * 1e-6) ? 0 : rawQty; // ignore les miettes d'arrondi
     const invested = qty * avgPrice;
@@ -255,7 +258,7 @@ function computePositions(transactions, sales, testPrices, livePrices = {}) {
     const testValue = hasTest ? effectivePrice * qty : null;
     const pv = hasTest ? testValue - invested : null;
     const pvPct = hasTest && invested > 0 ? (pv / invested) * 100 : null;
-    return { ...p, qty, avgPrice, invested, soldCostBasis, realizedPL, testPrice: hasManual ? manualTest : "", livePrice, valuationSource, hasTest, testValue, pv, pvPct };
+    return { ...p, account, qty, avgPrice, invested, soldCostBasis, realizedPL, testPrice: hasManual ? manualTest : "", livePrice, valuationSource, hasTest, testValue, pv, pvPct };
   }).sort((a, b) => b.invested - a.invested);
 }
 
@@ -745,6 +748,8 @@ function TransactionForm({ existingAssets = [], livePrices = {}, editingTx = nul
   const [amount, setAmount] = useState(editingTx && editingTx.category === "Crypto" ? String(editingTx.quantity * editingTx.price) : "");
   const [price, setPrice] = useState(editingTx ? String(editingTx.price) : "");
   const [date, setDate] = useState(editingTx?.date || todayStr());
+  const [isPEA, setIsPEA] = useState(editingTx?.account ? editingTx.account === "PEA" : true);
+  const [accountTouched, setAccountTouched] = useState(isEditing);
   const [mode, setMode] = useState("ponctuel");
   const [freqValue, setFreqValue] = useState("1");
   const [freqUnit, setFreqUnit] = useState("mois");
@@ -767,6 +772,13 @@ function TransactionForm({ existingAssets = [], livePrices = {}, editingTx = nul
     if (match) setSymbol(match.symbol);
   }, [name, category, existingAssets, symbolTouched]);
 
+  // Reprend le compte (PEA / CTO) d'une position existante du même nom
+  useEffect(() => {
+    if (accountTouched) return;
+    const match = existingAssets.find((a) => a.account && a.category === category && a.name.trim().toLowerCase() === name.trim().toLowerCase());
+    if (match) setIsPEA(match.account === "PEA");
+  }, [name, category, existingAssets, accountTouched]);
+
   // Prix d'achat par défaut = dernier prix actualisé du symbole (modifiable)
   const [priceTouched, setPriceTouched] = useState(isEditing);
   useEffect(() => {
@@ -777,8 +789,9 @@ function TransactionForm({ existingAssets = [], livePrices = {}, editingTx = nul
 
   const handleSubmit = () => {
     const qty = isCrypto ? Number(amount) / Number(price) : Number(quantity);
-    if (isEditing) onSubmitEdit({ ...editingTx, platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), date });
-    else if (mode === "ponctuel") onSubmitOnce({ id: uid(), platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), date });
+    const account = platform === "traderepublic" ? (isPEA ? "PEA" : "CTO") : undefined;
+    if (isEditing) onSubmitEdit({ ...editingTx, platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), date, account });
+    else if (mode === "ponctuel") onSubmitOnce({ id: uid(), platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), date, account });
     else onSubmitRecurring({ id: uid(), kind: "transaction", active: true, platform, category, name: name.trim(), symbol: symbol.trim(), quantity: qty, price: Number(price), startDate: date, frequencyValue: Number(freqValue), frequencyUnit: freqUnit, lastGeneratedDate: null });
   };
   return (
@@ -788,6 +801,12 @@ function TransactionForm({ existingAssets = [], livePrices = {}, editingTx = nul
           {PLATFORMS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
       </FieldRow>
+      {platform === "traderepublic" && (
+        <label className="bt-check-row">
+          <input type="checkbox" checked={isPEA} onChange={(e) => { setIsPEA(e.target.checked); setAccountTouched(true); }} />
+          <span>Placement dans un <strong>PEA</strong> <em>(décoché = CTO)</em></span>
+        </label>
+      )}
       <FieldRow label="Catégorie">
         <select value={category} onChange={(e) => setCategory(e.target.value)}>
           {CATEGORIES_INVEST.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -805,7 +824,7 @@ function TransactionForm({ existingAssets = [], livePrices = {}, editingTx = nul
           type="text"
           value={symbol}
           onChange={(e) => { setSymbol(e.target.value); setSymbolTouched(true); }}
-          placeholder={isCrypto ? "ex. bitcoin (identifiant CoinGecko)" : "ex. AAPL, HO..."}
+          placeholder={isCrypto ? "ex. BTCEUR" : "ex. HO.XPAR, SAF.XPAR..."}
         />
         <datalist id="bt-symbol-options">
           {symbolOptions.map((s) => <option key={s} value={s} />)}
@@ -1039,20 +1058,111 @@ function PlacementsTab({ data, actions }) {
 
   const toggleKey = (key) => setHiddenKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
 
+  const [account, setAccount] = usePersistentState("placements_account", "PEA");
+
+  // Historique de la valeur du portefeuille à chaque actualisation des prix (mini-courbe du bandeau)
+  const valueHistory = useMemo(() => {
+    const sorted = [...priceHistory].sort((a, b) => new Date(a.recordedAt) - new Date(b.recordedAt));
+    const times = [...new Set(sorted.map((r) => r.recordedAt))].slice(-60);
+    return times.map((t) => {
+      const T = new Date(t);
+      const day = ymd(T);
+      const latest = {};
+      sorted.filter((r) => new Date(r.recordedAt) <= T).forEach((r) => { latest[r.symbol.toUpperCase()] = r.price; });
+      const open = computePositions(transactions.filter((x) => x.date <= day), sales.filter((x) => x.date <= day), {}, latest).filter((p) => p.qty > 1e-9);
+      return { t: T.getTime(), v: open.reduce((sum, p) => sum + (p.hasTest ? p.testValue : p.invested), 0) };
+    });
+  }, [priceHistory, transactions, sales]);
+
+  const renderPosition = (p, i) => {
+    const color = POSITION_COLORS[i % POSITION_COLORS.length];
+    const tone = p.pv === null ? "neutral" : p.pv >= 0 ? "pos" : "neg";
+    const effective = p.hasTest && p.qty > 0 ? p.testValue / p.qty : null;
+    return (
+      <div className="bt-pcard" key={p.key}>
+        <div className="bt-pcard-top">
+          <span className="bt-avatar" style={{ background: color }}>{p.name.trim().slice(0, 2).toUpperCase()}</span>
+          <div className="bt-pcard-main">
+            <div className="bt-pcard-name">{p.name} <span className="bt-tag bt-tag-cat">{p.category}</span></div>
+            <div className="bt-pcard-figs">
+              <div><span className="bt-pcard-lbl">Investi / prix d'achat</span><strong>{eur(p.invested)} · {eur(p.avgPrice)}</strong></div>
+              <div className="bt-pcard-sep" />
+              <div>
+                <span className="bt-pcard-lbl">Prix actuel{p.valuationSource === "manuel" ? " (test)" : ""}</span>
+                <strong>{effective !== null ? eur(effective) : "—"}</strong>
+              </div>
+            </div>
+            <div className="bt-pcard-sub">
+              {formatQty(p.qty)} unités{p.realizedPL !== 0 ? ` · déjà réalisé : ${signedEur(p.realizedPL)}` : ""}
+              {!p.symbol ? " · pas de symbole suivi" : p.livePrice == null ? " · prix en direct indisponible" : priceUpdatedAt ? ` · maj ${new Date(priceUpdatedAt).toLocaleDateString("fr-FR")} ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+            </div>
+          </div>
+          <div className={`bt-sellbox bt-sellbox-${tone}`}>
+            <span>Si je vends :</span>
+            <strong>{p.pv === null ? "—" : signedEur(p.pv)}</strong>
+            <em>{p.pvPct === null ? "non simulé" : signedPct(p.pvPct)}</em>
+          </div>
+        </div>
+        <div className="bt-pcard-actions">
+          <label className="bt-pcard-check" title="Afficher cette position sur le graphe">
+            <input type="checkbox" checked={selectedKeys.has(p.key)} onChange={() => toggleKey(p.key)} style={{ accentColor: color }} /> Graphe
+          </label>
+          <label className="bt-pcard-test">
+            Prix test (€)
+            <input type="number" min="0" step="any" placeholder={p.livePrice != null ? `vide = ${eur(p.livePrice)}` : "prix de vente"} value={p.testPrice} onChange={(e) => actions.setTestPrice(p.key, e.target.value)} />
+          </label>
+          <span className="bt-pcard-spacer" />
+          {p.account && (
+            <button className="bt-btn-ghost bt-btn-sm" title="Changer le type de compte de cette position" onClick={() => actions.setPositionAccount(p, p.account === "PEA" ? "CTO" : "PEA")}>
+              Passer en {p.account === "PEA" ? "CTO" : "PEA"}
+            </button>
+          )}
+          <button className="bt-btn-ghost bt-btn-sm" onClick={() => setSellPosition(p)}>Vendre</button>
+          <button className="bt-btn-ghost bt-btn-sm" title="Supprimer la position" aria-label="Supprimer la position" onClick={() => setConfirmDelete({ type: "position", position: p })}><Trash2 size={14} /></button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="bt-tab">
-      <div className="bt-grid-stats">
-        <StatCard label="Versé depuis ma banque" value={eur(totalVerse)} sub={`TR ${eur(totalVerseTR)} · Kraken Pro ${eur(totalVerseBinance)}`} />
-        <StatCard label="Valeur des actifs sur les marchés" value={eur(valeurMarche)} sub={nonSimulees > 0 ? `${nonSimulees} position(s) non simulée(s), valorisée(s) au coût` : `${openPositions.length} position(s) ouverte(s)`} />
-        <StatCard label="Liquidités non réinvesties" value={eur(liquidites)} sub="Versé − investi + produit des ventes" tone={liquidites < 0 ? "neg" : undefined} />
-        <StatCard
-          label="Plus-value latente / réalisée"
-          value={testedOpen.length ? signedEur(pvLatente) : "—"}
-          sub={<>Réalisée (ventes) : <span className={pvRealisee > 0 ? "bt-text-pos" : pvRealisee < 0 ? "bt-text-neg" : ""}>{signedEur(pvRealisee)}</span></>}
-          tone={testedOpen.length ? (pvLatente >= 0 ? "pos" : "neg") : undefined}
-        />
+      <div className="bt-pf-band">
+        <div className="bt-pf-cell">
+          <div className="bt-pf-lbl">Valeur actuelle</div>
+          <div className="bt-pf-big">{eur(valeurMarche)}</div>
+          {nonSimulees > 0 && <div className="bt-pf-small">{nonSimulees} position(s) valorisée(s) au coût</div>}
+        </div>
+        {valueHistory.length >= 2 && (
+          <div className="bt-pf-spark">
+            <ResponsiveContainer width="100%" height={70}>
+              <AreaChart data={valueHistory} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="pfGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--bt-green)" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="var(--bt-green)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <YAxis hide domain={["dataMin", "dataMax"]} />
+                <Tooltip formatter={(v) => eur(v)} labelFormatter={(t) => new Date(t).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} contentStyle={{ background: "var(--bt-surface)", border: "1px solid var(--bt-border)", borderRadius: 10, fontSize: 12 }} />
+                <Area dataKey="v" type="monotone" stroke="var(--bt-green)" strokeWidth={2} fill="url(#pfGrad)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        <div className="bt-pf-sep" />
+        <div className="bt-pf-cell">
+          <div className="bt-pf-lbl">Investi</div>
+          <div className="bt-pf-big">{eur(investiActuel)}</div>
+        </div>
+        <div className="bt-pf-sep" />
+        <div className="bt-pf-cell">
+          <div className="bt-pf-lbl">Gain si vente</div>
+          <div className={`bt-pf-big ${testedOpen.length ? (pvLatente >= 0 ? "bt-text-pos" : "bt-text-neg") : ""}`}>{testedOpen.length ? signedEur(pvLatente) : "—"}</div>
+        </div>
       </div>
 
+      <div className="bt-pf-toolbar">
+        <div className="bt-pf-toolbar-left">
       {trackedOpen.length > 0 && (
         <div className="bt-price-bar">
           <span>
@@ -1065,70 +1175,53 @@ function PlacementsTab({ data, actions }) {
           )}
         </div>
       )}
-
-      <div className="bt-card">
-        <div className="bt-card-head">
-          <h3>Mes positions</h3>
-          <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowTxForm(true)}><Plus size={16} /> Ajouter un achat</button>
         </div>
-        {openPositions.length === 0 ? <EmptyState text="Aucune position ouverte pour l'instant. Ajoute ton premier achat." /> : (
-          <div className="bt-positions-cols">
-            {PLATFORMS.map((pl) => {
-              const inCol = openPositions.map((p, i) => ({ p, i })).filter(({ p }) => p.platform === pl.id);
-              return (
-              <div className="bt-positions-col" key={pl.id}>
-                <div className="bt-positions-col-title">{pl.label}</div>
-                {inCol.length === 0 && <div className="bt-position-current-meta">Aucune position</div>}
-                <div className="bt-positions">
-            {inCol.map(({ p, i }) => (
-              <div className="bt-position-row" key={p.key}>
-                <div className="bt-position-check">
-                  <input type="checkbox" checked={selectedKeys ? selectedKeys.has(p.key) : true} onChange={() => toggleKey(p.key)} style={{ accentColor: POSITION_COLORS[i % POSITION_COLORS.length] }} />
-                </div>
-                <div className="bt-position-main">
-                  <div className="bt-position-name">
-                    <span className="bt-dot" style={{ background: POSITION_COLORS[i % POSITION_COLORS.length] }} />
-                    {p.name}
-                    <span className="bt-tag">{p.category}</span>
-                    <span className="bt-tag bt-tag-alt">{PLATFORMS.find((pl) => pl.id === p.platform)?.label}</span>
+        <button className="bt-btn-primary bt-btn-sm" onClick={() => setShowTxForm(true)}><Plus size={16} /> Ajouter un achat</button>
+      </div>
+
+      {openPositions.length === 0 ? <div className="bt-card"><EmptyState text="Aucune position ouverte pour l'instant. Ajoute ton premier achat." /></div> : (
+        <div className="bt-pf-cols">
+          {PLATFORMS.map((pl) => {
+            const all = openPositions.map((p, i) => ({ p, i })).filter(({ p }) => p.platform === pl.id);
+            const isTR = pl.id === "traderepublic";
+            const shown = isTR ? all.filter(({ p }) => p.account === account) : all;
+            return (
+              <div className="bt-pf-panel" key={pl.id}>
+                <div className="bt-pf-panel-head">
+                  <span className="bt-pf-logo">{isTR ? <Landmark size={22} /> : <Wallet size={22} />}</span>
+                  <div>
+                    <div className="bt-pf-panel-title">{pl.label}</div>
+                    <div className="bt-pf-panel-sub">{isTR ? "Actions · ETF · Or" : "Crypto"}</div>
                   </div>
-                  <div className="bt-position-sub">{formatQty(p.qty)} unités · PRU {eur(p.avgPrice)} · investi {eur(p.invested)}{p.realizedPL !== 0 ? ` · déjà réalisé : ${signedEur(p.realizedPL)}` : ""}{!p.symbol && " · pas de symbole suivi"}</div>
                 </div>
-                <div className="bt-position-current">
-                  {p.symbol ? (
-                    p.livePrice != null ? (
-                      <>
-                        <div className="bt-position-current-price">{eur(p.livePrice)}</div>
-                        <div className="bt-position-current-meta">
-                          Prix actuel{priceUpdatedAt ? ` (dernière maj le ${new Date(priceUpdatedAt).toLocaleDateString("fr-FR")} à ${new Date(priceUpdatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })})` : ""}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="bt-position-current-meta">Prix en direct indisponible</div>
-                    )
-                  ) : (
-                    <div className="bt-position-current-meta">—</div>
-                  )}
-                </div>
-                <div className="bt-position-test">
-                  <label>Prix test (€)</label>
-                  <input type="number" min="0" step="any" placeholder={p.livePrice != null ? `vide = ${eur(p.livePrice)}` : "prix de vente"} value={p.testPrice} onChange={(e) => actions.setTestPrice(p.key, e.target.value)} />
-                </div>
-                <div className="bt-position-pv">
-                  <DeltaPill value={p.pv} />
-                  {p.pvPct !== null && <DeltaPill value={p.pvPct} mode="pct" size="sm" />}
-                  {p.valuationSource && <span className="bt-valuation-source">{p.valuationSource}</span>}
-                </div>
-                <button className="bt-btn-ghost bt-btn-sm" onClick={() => setSellPosition(p)}>Vendre</button>
-                <button className="bt-btn-ghost bt-btn-sm" title="Supprimer la position" aria-label="Supprimer la position" onClick={() => setConfirmDelete({ type: "position", position: p })}><Trash2 size={14} /></button>
-              </div>
-            ))}
+                {isTR && (
+                  <div className="bt-pf-tabs">
+                    {["PEA", "CTO"].map((acc) => (
+                      <button key={acc} className={account === acc ? "active" : ""} onClick={() => setAccount(acc)}>
+                        {acc} <span className="bt-pf-count">{all.filter(({ p }) => p.account === acc).length}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="bt-pcards">
+                  {shown.length === 0 ? <div className="bt-pcard-empty">{isTR ? `Aucune position ${account}` : "Aucune position"}</div> : shown.map(({ p, i }) => renderPosition(p, i))}
                 </div>
               </div>
-              );
-            })}
-          </div>
-        )}
+            );
+          })}
+        </div>
+      )}
+
+      <div className="bt-grid-stats">
+        <StatCard label="Versé depuis ma banque" value={eur(totalVerse)} sub={`TR ${eur(totalVerseTR)} · Kraken Pro ${eur(totalVerseBinance)}`} />
+        <StatCard label="Valeur des actifs sur les marchés" value={eur(valeurMarche)} sub={nonSimulees > 0 ? `${nonSimulees} position(s) non simulée(s), valorisée(s) au coût` : `${openPositions.length} position(s) ouverte(s)`} />
+        <StatCard label="Liquidités non réinvesties" value={eur(liquidites)} sub="Versé − investi + produit des ventes" tone={liquidites < 0 ? "neg" : undefined} />
+        <StatCard
+          label="Plus-value latente / réalisée"
+          value={testedOpen.length ? signedEur(pvLatente) : "—"}
+          sub={<>Réalisée (ventes) : <span className={pvRealisee > 0 ? "bt-text-pos" : pvRealisee < 0 ? "bt-text-neg" : ""}>{signedEur(pvRealisee)}</span></>}
+          tone={testedOpen.length ? (pvLatente >= 0 ? "pos" : "neg") : undefined}
+        />
       </div>
 
       <div className="bt-two-col bt-cal-chart-row">
@@ -1286,7 +1379,7 @@ function PlacementsTab({ data, actions }) {
       <Modal open={showTxForm} title="Ajouter un achat" onClose={() => setShowTxForm(false)}>
         <TransactionForm
           livePrices={livePrices}
-          existingAssets={positions.map((p) => ({ name: p.name, category: p.category, symbol: p.symbol }))}
+          existingAssets={positions.map((p) => ({ name: p.name, category: p.category, symbol: p.symbol, account: p.account }))}
           onSubmitOnce={(tx) => { actions.addTransaction(tx); setShowTxForm(false); }}
           onSubmitRecurring={(rule) => { actions.addRecurringRule(rule); setShowTxForm(false); }}
           onCancel={() => setShowTxForm(false)}
@@ -1296,7 +1389,7 @@ function PlacementsTab({ data, actions }) {
         {editingTx && (
           <TransactionForm
             livePrices={livePrices}
-            existingAssets={positions.map((p) => ({ name: p.name, category: p.category, symbol: p.symbol }))}
+            existingAssets={positions.map((p) => ({ name: p.name, category: p.category, symbol: p.symbol, account: p.account }))}
             editingTx={editingTx}
             onSubmitEdit={(tx) => { actions.updateTransaction(tx); setEditingTx(null); }}
             onCancel={() => setEditingTx(null)}
@@ -2186,6 +2279,11 @@ export default function App() {
     updateDeposit: (d) => { setDeposits((prev) => prev.map((x) => x.id === d.id ? d : x)); api.updateDeposit(d); },
     deleteDeposit: (id) => { setDeposits((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("deposits", id); },
     addTransaction: (t) => { setTransactions((prev) => [...prev, t]); api.insertTransactions([t]); },
+    setPositionAccount: (p, account) => {
+      const ids = p.txs.map((t) => t.id);
+      setTransactions((prev) => prev.map((x) => (ids.includes(x.id) ? { ...x, account } : x)));
+      p.txs.forEach((t) => api.updateTransaction({ ...t, account }));
+    },
     updateTransaction: (t) => { setTransactions((prev) => prev.map((x) => x.id === t.id ? t : x)); api.updateTransaction(t); },
     deleteTransaction: (id) => { setTransactions((prev) => prev.filter((x) => x.id !== id)); api.deleteRow("transactions", id); },
     addSale: (v) => { setSales((prev) => [...prev, v]); api.insertSales([v]); },
@@ -2232,7 +2330,7 @@ export default function App() {
   const data = { deposits, transactions, sales, testPrices, avDeposits, expenses, settings, rules, savings, priceHistory, livePrices, priceMeta, priceUpdatedAt, pricesLoading, refreshPrices };
 
   return (
-    <div className="bt-app">
+    <div className={`bt-app ${tab === "placements" ? "bt-dark" : ""}`}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -2301,7 +2399,7 @@ export default function App() {
         .bt-main { flex: 1; min-width: 0; padding: 28px 32px 100px; }
         .bt-page-title { font-family: 'Fraunces', serif; font-size: 26px; font-weight: 600; margin: 0 0 20px; }
         .bt-page-head { display: flex; align-items: center; justify-content: space-between; }
-        .bt-logout-mobile { display: none; align-items: center; gap: 5px; background: var(--bt-surface-alt); color: var(--bt-red); border: none; padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 20px; height: fit-content; }
+        .bt-logout-mobile { display: inline-flex; align-items: center; gap: 5px; background: var(--bt-surface-alt); color: var(--bt-red); border: none; padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 20px; height: fit-content; }
 
         .bt-tab { display: flex; flex-direction: column; gap: 20px; }
 
@@ -2514,7 +2612,105 @@ export default function App() {
         .bt-recurring-chip svg:first-child { flex-shrink: 0; }
         .bt-recurring-mark { color: var(--bt-amber); margin-left: 5px; vertical-align: -1px; }
 
-        .bt-bottomnav { display: none; }
+        .bt-bottomnav {
+          display: flex;
+          position: fixed;
+          bottom: 0; left: 0; right: 0;
+          background: var(--bt-surface);
+          border-top: 1px solid var(--bt-border);
+          padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
+          justify-content: space-around;
+          z-index: 50;
+        }
+        .bt-bottomnav button {
+          display: flex; flex-direction: column; align-items: center; gap: 3px;
+          background: none; border: none; color: var(--bt-ink-soft); font-size: 12px; font-weight: 600; padding: 4px 2px; flex: 1; min-width: 0; white-space: nowrap;
+        }
+        .bt-bottomnav button.active { color: var(--bt-teal); }
+        .bt-app { padding-bottom: 0; }
+
+        /* Thème sombre : uniquement l'onglet Placements */
+        .bt-app.bt-dark {
+          --bt-bg: #0E1621;
+          --bt-surface: #152233;
+          --bt-surface-alt: #1C2D42;
+          --bt-ink: #F1F5F9;
+          --bt-ink-soft: #93A4B8;
+          --bt-teal: #34D399;
+          --bt-teal-soft: rgba(52, 211, 153, 0.14);
+          --bt-amber: #F0A35E;
+          --bt-amber-soft: rgba(240, 163, 94, 0.16);
+          --bt-green: #3DDC84;
+          --bt-green-soft: rgba(61, 220, 132, 0.16);
+          --bt-red: #FF7B7B;
+          --bt-red-soft: rgba(255, 107, 107, 0.16);
+          --bt-border: #25374D;
+        }
+        .bt-dark .bt-btn-primary { color: #04210F; }
+        .bt-dark input, .bt-dark select { color-scheme: dark; }
+        .bt-dark .bt-cal-cell.empty { background: var(--bt-surface-alt); }
+        .bt-dark .bt-segment { background: var(--bt-surface-alt); }
+        .bt-dark .bt-segment-btn.active { background: var(--bt-surface); color: var(--bt-ink); }
+
+        .bt-check-row { display: flex; align-items: center; gap: 10px; font-size: 14px; padding: 10px 12px; border: 1px solid var(--bt-border); border-radius: 10px; cursor: pointer; }
+        .bt-check-row input { width: 18px; height: 18px; accent-color: var(--bt-teal); }
+        .bt-check-row em { font-style: normal; color: var(--bt-ink-soft); font-size: 12.5px; }
+
+        /* Bandeau « Mon portefeuille » */
+        .bt-pf-band { display: flex; align-items: center; gap: 22px; background: var(--bt-surface); border: 1px solid var(--bt-border); border-radius: 18px; padding: 18px 24px; flex-wrap: wrap; }
+        .bt-pf-cell { min-width: 140px; }
+        .bt-pf-lbl { font-size: 15px; color: var(--bt-teal); font-weight: 600; margin-bottom: 4px; }
+        .bt-pf-big { font-family: 'Space Mono', monospace; font-size: 30px; font-weight: 700; }
+        .bt-pf-small { font-size: 11.5px; color: var(--bt-ink-soft); margin-top: 4px; }
+        .bt-pf-spark { flex: 1; min-width: 160px; }
+        .bt-pf-sep { width: 1px; align-self: stretch; background: var(--bt-border); }
+        .bt-pf-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .bt-pf-toolbar-left { flex: 1; min-width: 0; }
+        .bt-pf-toolbar-left .bt-price-bar { border-radius: 12px; }
+
+        .bt-pf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+        .bt-pf-panel { background: var(--bt-surface); border: 1px solid var(--bt-border); border-radius: 18px; padding: 18px; min-width: 0; }
+        .bt-pf-panel-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+        .bt-pf-logo { width: 46px; height: 46px; border-radius: 12px; background: var(--bt-surface-alt); color: var(--bt-teal); display: inline-flex; align-items: center; justify-content: center; }
+        .bt-pf-panel-title { font-size: 22px; font-weight: 700; }
+        .bt-pf-panel-sub { font-size: 14px; color: var(--bt-ink-soft); }
+        .bt-pf-tabs { display: flex; border-bottom: 1px solid var(--bt-border); margin-bottom: 14px; }
+        .bt-pf-tabs button { flex: 1; background: none; border: none; border-bottom: 3px solid transparent; color: var(--bt-ink-soft); font-size: 16px; font-weight: 600; padding: 10px 6px; margin-bottom: -1px; }
+        .bt-pf-tabs button.active { color: var(--bt-ink); border-bottom-color: var(--bt-green); }
+        .bt-pf-count { display: inline-block; background: var(--bt-surface-alt); color: var(--bt-ink-soft); font-size: 12px; padding: 1px 7px; border-radius: 6px; margin-left: 4px; }
+        .bt-pcards { display: flex; flex-direction: column; gap: 10px; }
+        .bt-pcard-empty { color: var(--bt-ink-soft); font-size: 13.5px; padding: 18px 4px; text-align: center; }
+        .bt-pcard { background: var(--bt-bg); border: 1px solid var(--bt-border); border-radius: 14px; padding: 14px; }
+        .bt-pcard-top { display: flex; align-items: center; gap: 14px; }
+        .bt-avatar { width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 14px; }
+        .bt-pcard-main { flex: 1; min-width: 0; }
+        .bt-pcard-name { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .bt-tag-cat { background: var(--bt-teal-soft); color: var(--bt-teal); }
+        .bt-pcard-figs { display: flex; align-items: center; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+        .bt-pcard-figs strong { display: block; font-size: 14.5px; }
+        .bt-pcard-lbl { display: block; font-size: 12px; color: var(--bt-ink-soft); margin-bottom: 2px; }
+        .bt-pcard-sep { width: 1px; height: 30px; background: var(--bt-border); }
+        .bt-pcard-sub { font-size: 11.5px; color: var(--bt-ink-soft); margin-top: 6px; }
+        .bt-sellbox { flex-shrink: 0; min-width: 130px; border-radius: 12px; padding: 10px 12px; text-align: center; display: flex; flex-direction: column; gap: 2px; }
+        .bt-sellbox span { font-size: 12.5px; }
+        .bt-sellbox strong { font-family: 'Space Mono', monospace; font-size: 20px; }
+        .bt-sellbox em { font-style: normal; font-size: 14px; font-weight: 600; }
+        .bt-sellbox-pos { background: rgba(46, 158, 79, 0.2); color: var(--bt-green); border: 1px solid rgba(46, 158, 79, 0.35); }
+        .bt-sellbox-neg { background: rgba(214, 69, 69, 0.2); color: var(--bt-red); border: 1px solid rgba(214, 69, 69, 0.35); }
+        .bt-sellbox-neutral { background: var(--bt-surface-alt); color: var(--bt-ink-soft); }
+        .bt-pcard-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--bt-border); flex-wrap: wrap; }
+        .bt-pcard-spacer { flex: 1; }
+        .bt-pcard-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--bt-ink-soft); }
+        .bt-pcard-check input { width: 16px; height: 16px; }
+        .bt-pcard-test { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--bt-ink-soft); }
+        .bt-pcard-test input { width: 110px; padding: 6px 8px; border: 1px solid var(--bt-border); border-radius: 8px; font-size: 13px; background: var(--bt-surface); color: var(--bt-ink); }
+        @media (max-width: 1100px) { .bt-pf-cols { grid-template-columns: 1fr; } }
+        @media (max-width: 560px) {
+          .bt-pf-big { font-size: 24px; }
+          .bt-pf-sep { display: none; }
+          .bt-pcard-top { flex-wrap: wrap; }
+          .bt-sellbox { width: 100%; flex-direction: row; justify-content: space-between; align-items: center; }
+        }
         .bt-loading { display: flex; align-items: center; justify-content: center; height: 100vh; width: 100%; gap: 10px; color: var(--bt-ink-soft); font-size: 14px; }
         .bt-login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; width: 100%; padding: 20px; }
         .bt-login-card { background: var(--bt-surface); border: 1px solid var(--bt-border); border-radius: 18px; padding: 32px 28px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 14px; }
@@ -2558,19 +2754,6 @@ export default function App() {
         <div className="bt-loading"><Loader2 className="bt-spin" size={20} style={{ animation: "spin 1s linear infinite" }} /> Chargement de tes données…</div>
       ) : (
         <>
-          <nav className="bt-sidebar">
-            <div className="bt-brand"><Landmark size={20} /> Suivi budget</div>
-            {TABS.map((t) => {
-              const Icon = t.icon;
-              return (
-                <button key={t.id} className={`bt-nav-item ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
-                  <Icon size={17} /> {t.label}
-                </button>
-              );
-            })}
-            <button className="bt-nav-item bt-nav-logout" onClick={() => api.signOut()}><X size={17} /> Se déconnecter</button>
-          </nav>
-
           <main className="bt-main">
             <div className="bt-page-head">
               <h1 className="bt-page-title">{TABS.find((t) => t.id === tab)?.label}</h1>
