@@ -1219,6 +1219,12 @@ function PlacementsTab({ data, actions }) {
         </>,
         headEl
       )}
+      {priceMeta && priceMeta.stockError && (
+        <div className="bt-price-note bt-price-note-warn">Actions / ETF : Marketstack a répondu « {priceMeta.stockError} ».</div>
+      )}
+      {priceMeta && !priceMeta.stockError && priceMeta.missingStocks && priceMeta.missingStocks.length > 0 && (
+        <div className="bt-price-note bt-price-note-warn">Marketstack n'a renvoyé aucun prix pour : {priceMeta.missingStocks.join(", ")}. Vérifie le symbole (bouton crayon de la position).</div>
+      )}
       {priceMeta && priceMeta.quotaReached && (
         <div className="bt-price-note bt-price-note-warn">Quota mensuel d'actualisations atteint — les prix des actions/ETF resteront fixes jusqu'au mois prochain (la crypto continue de s'actualiser).</div>
       )}
